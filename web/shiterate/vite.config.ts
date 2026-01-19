@@ -15,7 +15,21 @@ const config = defineConfig({
     proxy: {
       "/agents": {
         target: "http://localhost:3001",
-        changeOrigin: true
+        changeOrigin: true,
+        // Configure proxy for SSE (Server-Sent Events) streaming
+        configure: (proxy, _options) => {
+          // Disable buffering for SSE responses
+          proxy.on("proxyRes", (proxyRes, req, res) => {
+            // Check if this is an SSE request (has live=sse in query)
+            if (req.url?.includes("live=sse")) {
+              // Set headers to disable buffering
+              res.setHeader("Cache-Control", "no-cache");
+              res.setHeader("X-Accel-Buffering", "no");
+              // Ensure chunked transfer encoding for streaming
+              res.setHeader("Transfer-Encoding", "chunked");
+            }
+          });
+        },
       },
     },
   },

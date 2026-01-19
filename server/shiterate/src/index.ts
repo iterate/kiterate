@@ -107,17 +107,31 @@ async function main() {
     console.log(`${method} ${reqUrl} -> ${response.status}`);
 
     // Pipe response back - stream SSE responses, buffer others
-    res.writeHead(response.status, Object.fromEntries(response.headers));
-    
     const contentType = response.headers.get("content-type") ?? "";
+    
     if (contentType.includes("text/event-stream") && response.body) {
-      // Stream SSE responses in real-time
+      // For SSE, set proper headers to disable buffering
+      const headers = Object.fromEntries(response.headers);
+      // Add headers to prevent buffering at various levels
+      headers["cache-control"] = "no-cache";
+      headers["x-accel-buffering"] = "no";
+      // Ensure connection stays open
+      headers["connection"] = "keep-alive";
+      
+      res.writeHead(response.status, headers);
+      
+      // Stream SSE responses in real-time with immediate flushing
       const reader = response.body.getReader();
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          res.write(value);
+          // Write and flush immediately for real-time streaming
+          const written = res.write(value);
+          // If the write buffer is full, wait for it to drain
+          if (!written) {
+            await new Promise<void>((resolve) => res.once("drain", resolve));
+          }
         }
       } catch {
         // Client disconnected
@@ -125,6 +139,7 @@ async function main() {
         res.end();
       }
     } else {
+      res.writeHead(response.status, Object.fromEntries(response.headers));
       // Buffer non-SSE responses
       res.end(Buffer.from(await response.arrayBuffer()));
     }
