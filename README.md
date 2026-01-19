@@ -128,7 +128,7 @@ const FRONTENDS = new Map([
 
 `web/shiterate`: A web frontend to interact with the server
 
-`cli/shiterate`: A CLI to interact with the server
+`cli/basic`: A CLI to interact with the server
 - `./main.ts [--url http://localhost:3001] <agent-path> append {json-event}`
 - `./main.ts [--url http://localhost:3001] <agent-path> stream [--offset X] [--live]`
 

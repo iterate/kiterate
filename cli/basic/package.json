@@ -1,10 +1,10 @@
 {
-  "name": "@kiterate/cli-shiterate",
+  "name": "@kiterate/cli-basic",
   "version": "0.0.1",
   "private": true,
   "type": "module",
   "bin": {
-    "shiterate": "./main.ts"
+    "basic-cli": "./main.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

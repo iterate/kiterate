@@ -8,16 +8,16 @@
 # - Offset parameter (offset=-1, offset=<specific>)
 # - Implicit stream creation
 #
-# Usage: ./scripts/smoke-test.sh [server-name]
+# Usage: ./smoke-test.sh [server-name]
 #
 # Arguments:
 #   server-name   Name of server in server/ directory (default: basic)
 #                 Available: basic, basic-with-pi
 #
 # Examples:
-#   ./scripts/smoke-test.sh              # Test basic
-#   ./scripts/smoke-test.sh basic
-#   ./scripts/smoke-test.sh basic-with-pi
+#   ./smoke-test.sh              # Test basic
+#   ./smoke-test.sh basic
+#   ./smoke-test.sh basic-with-pi
 #
 
 set -euo pipefail
@@ -38,9 +38,8 @@ BOLD='\033[1m'
 PIDS=()
 TEMP_FILES=()
 
-# Get script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Get project root (script is at top level)
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Parse arguments
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
@@ -328,9 +327,20 @@ grep "event: data" -A1 "$CONSUMER1_OUT" | head -6 | sed 's/^/    /'
 
 section "6. Testing Offset Parameter"
 
+# Helper function to count events from SSE response
+# SSE format: "event: data\ndata: {...}\n\n"
+count_sse_events() {
+    grep -c '^data: {' 2>/dev/null || echo "0"
+}
+
+# Helper function to extract offset from first SSE event
+get_first_offset() {
+    grep '^data: ' | head -1 | sed 's/^data: //' | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('offset', ''))" 2>/dev/null || echo ""
+}
+
 test_header "offset=-1 (read from beginning)"
 RESULT=$(curl -s "$STREAM_URL?offset=-1")
-EVENT_COUNT=$(echo "$RESULT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+EVENT_COUNT=$(echo "$RESULT" | count_sse_events)
 echo "    Events returned: $EVENT_COUNT"
 if [ "$EVENT_COUNT" -eq 5 ]; then
     pass "offset=-1 returns all 5 events (init + 4 messages)"
@@ -338,14 +348,14 @@ else
     fail "offset=-1 returned $EVENT_COUNT events (expected 5)"
 fi
 
-# Get an offset from the results
-FIRST_OFFSET=$(echo "$RESULT" | python3 -c "import sys,json; data=json.load(sys.stdin); print(data[0].get('offset', ''))" 2>/dev/null || echo "")
+# Get an offset from the results (extracting from SSE data line)
+FIRST_OFFSET=$(echo "$RESULT" | get_first_offset)
 echo "    First event offset: $FIRST_OFFSET"
 
 if [ -n "$FIRST_OFFSET" ]; then
     test_header "offset=<specific> (resume from middle)"
     RESULT=$(curl -s "$STREAM_URL?offset=$FIRST_OFFSET")
-    PARTIAL_COUNT=$(echo "$RESULT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+    PARTIAL_COUNT=$(echo "$RESULT" | count_sse_events)
     echo "    Events from offset $FIRST_OFFSET: $PARTIAL_COUNT"
     if [ "$PARTIAL_COUNT" -gt 0 ] && [ "$PARTIAL_COUNT" -lt 5 ]; then
         pass "Partial read from specific offset works"
@@ -365,7 +375,20 @@ fi
 section "7. Verifying Events Contain Offset"
 
 test_header "Check events have offset field"
-HAS_OFFSET=$(echo "$RESULT" | python3 -c "import sys,json; data=json.load(sys.stdin); print('yes' if all('offset' in e for e in data) else 'no')" 2>/dev/null || echo "no")
+# Check that all SSE data lines contain "offset" in the JSON
+HAS_OFFSET=$(echo "$RESULT" | grep '^data: ' | sed 's/^data: //' | python3 -c "
+import sys, json
+all_have_offset = True
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    data = json.loads(line)
+    if 'offset' not in data:
+        all_have_offset = False
+        break
+print('yes' if all_have_offset else 'no')
+" 2>/dev/null || echo "no")
 if [ "$HAS_OFFSET" = "yes" ]; then
     pass "All events contain offset field"
 else
@@ -380,12 +403,15 @@ section "8. Final Verification"
 
 test_header "Reading all events"
 FINAL_RESULT=$(curl -s "$STREAM_URL?offset=-1")
-FINAL_COUNT=$(echo "$FINAL_RESULT" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+FINAL_COUNT=$(echo "$FINAL_RESULT" | count_sse_events)
 echo "    Total events in stream: $FINAL_COUNT"
 
 echo ""
 echo -e "${CYAN}    All events:${NC}"
-echo "$FINAL_RESULT" | python3 -m json.tool 2>/dev/null | head -40 | sed 's/^/    /'
+# Pretty print each SSE data line as JSON
+echo "$FINAL_RESULT" | grep '^data: ' | sed 's/^data: //' | while read -r line; do
+    echo "$line" | python3 -m json.tool 2>/dev/null | head -10 | sed 's/^/    /'
+done | head -40
 
 if [ "$FINAL_COUNT" -eq 5 ]; then
     pass "Stream contains all 5 events"

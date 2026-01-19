@@ -5,7 +5,7 @@
   "scripts": {
     "prepare": "effect-language-service patch",
     "dev": "doppler run -- node dev.mjs",
-    "dev:shiterate": "doppler run -- node dev.mjs shiterate shiterate",
+    "dev:basic": "doppler run -- node dev.mjs basic shiterate",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --fix",
     "lint:check": "eslint . --max-warnings 0",

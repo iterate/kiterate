@@ -45,7 +45,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  cli/shiterate:
+  cli/basic:
     devDependencies:
       '@types/node':
         specifier: ^24.10.1

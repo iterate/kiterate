@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Shiterate CLI - Simple command-line interface for the event stream server
+ * Basic CLI - Simple command-line interface for the event stream server
  *
  * Usage:
  *   ./main.ts [--url http://localhost:3001] <agent-path> append <json-event>
@@ -17,7 +17,7 @@ const DEFAULT_URL = "http://localhost:3001"
 
 function printUsage() {
   console.error(`
-Shiterate CLI - Interact with the event stream server
+Basic CLI - Interact with the event stream server
 
 Usage:
   ./main.ts [--url URL] <agent-path> append <json-event>

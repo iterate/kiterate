@@ -48,9 +48,10 @@ async function main() {
   const basicApp = createApp({ store });
 
   // Create PI adapter - when PI emits events, append them to the store
-  const piAdapter = new PiAdapter((agentPath, event) => {
-    store.append(agentPath, event);
-  }, PI_SESSIONS_FILE);
+  const piAdapter = new PiAdapter({
+    append: (agentPath, event) => store.append(agentPath, event),
+    sessionsFile: PI_SESSIONS_FILE,
+  });
 
   // Load existing sessions
   await piAdapter.loadSessions();
@@ -81,13 +82,10 @@ async function main() {
     // If successful, trigger PI adapter
     if (response.ok) {
       const agentPath = "/pi/" + c.req.param("path");
-      console.log(`[Server] Triggering PI adapter for ${agentPath}`);
       try {
-        await piAdapter.handleEvent(agentPath, body);
-        console.log(`[Server] PI adapter completed for ${agentPath}`);
+        await piAdapter.on(agentPath, body);
       } catch (err) {
         console.error(`[Server] PI adapter error for ${agentPath}:`, err);
-        // Don't fail the response - the event was stored successfully
       }
     }
 

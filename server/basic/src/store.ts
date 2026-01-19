@@ -129,7 +129,12 @@ export class EventStore {
       fs.mkdirSync(dir, { recursive: true });
     }
     
-    const content = YAML.stringify(data);
+    // Filter out transient events (message_update) before persisting
+    const persistedEvents = data.events.filter(
+      (e) => (e.data as Record<string, unknown>)?.payload?.piEventType !== "message_update"
+    );
+    
+    const content = YAML.stringify({ ...data, events: persistedEvents });
     fs.writeFileSync(filePath, content, "utf-8");
   }
 
