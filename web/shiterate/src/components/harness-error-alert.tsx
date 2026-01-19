@@ -2,7 +2,7 @@ import { useState } from "react";
 import { AlertCircleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert.tsx";
 import { Button } from "@/components/ui/button.tsx";
-import type { ErrorFeedItem } from "@/reducers/messages-reducer.ts";
+import type { ErrorFeedItem } from "@/reducers";
 
 export function HarnessErrorAlert({ error }: { error: ErrorFeedItem }) {
   const [expanded, setExpanded] = useState(false);

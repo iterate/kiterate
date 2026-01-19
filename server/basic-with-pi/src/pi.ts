@@ -65,6 +65,19 @@ export class PiAdapter {
     return null;
   }
 
+  private wrapPiEvent(agentPath: string, piEvent: AgentSessionEvent): unknown {
+    return {
+      type: "iterate:agent:harness:pi:event-received",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      eventStreamId: agentPath,
+      payload: {
+        piEventType: piEvent.type,
+        piEvent,
+      },
+    };
+  }
+
   async loadSessions(): Promise<void> {
     if (!fs.existsSync(this.config.sessionsFile)) return;
 
@@ -118,7 +131,7 @@ export class PiAdapter {
     });
 
     const unsubscribe = session.subscribe((piEvent: AgentSessionEvent) => {
-      this.config.append(agentPath, piEvent);
+      this.config.append(agentPath, this.wrapPiEvent(agentPath, piEvent));
     });
 
     const state: SessionState = { session, sessionManager, sessionFile, unsubscribe };
@@ -146,7 +159,7 @@ export class PiAdapter {
     }
 
     const unsubscribe = session.subscribe((piEvent: AgentSessionEvent) => {
-      this.config.append(agentPath, piEvent);
+      this.config.append(agentPath, this.wrapPiEvent(agentPath, piEvent));
     });
 
     const state: SessionState = { session, sessionManager, sessionFile, unsubscribe };

@@ -27,8 +27,16 @@ const TEST_RUN_ID = Date.now();
 interface SSEEvent {
   type?: string;
   offset?: string;
-  content?: string;
-  text?: string;
+  payload?: {
+    piEventType?: string;
+    piEvent?: {
+      type: string;
+      content?: string;
+      text?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
   [key: string]: unknown;
 }
 
@@ -275,9 +283,9 @@ describe("PI Agent E2E", () => {
       for await (const event of subscribeToSSE(CONCURRENT_AGENT_PATH, abortController1.signal)) {
         subscriber1Events.push(event);
         
-        if (event.type) {
-          console.log(`[Test] Sub1 Event: ${event.type}`);
-          if (event.type === "message_end") {
+        if (event.payload?.piEventType) {
+          console.log(`[Test] Sub1 PI Event: ${event.payload.piEventType}`);
+          if (event.payload.piEventType === "message_end") {
             sub1MessageEndCount++;
             if (sub1MessageEndCount >= 2) {
               setTimeout(() => abortController1.abort(), 500);
@@ -292,9 +300,9 @@ describe("PI Agent E2E", () => {
       for await (const event of subscribeToSSE(CONCURRENT_AGENT_PATH, abortController2.signal)) {
         subscriber2Events.push(event);
         
-        if (event.type) {
-          console.log(`[Test] Sub2 Event: ${event.type}`);
-          if (event.type === "message_end") {
+        if (event.payload?.piEventType) {
+          console.log(`[Test] Sub2 PI Event: ${event.payload.piEventType}`);
+          if (event.payload.piEventType === "message_end") {
             sub2MessageEndCount++;
             if (sub2MessageEndCount >= 2) {
               setTimeout(() => abortController2.abort(), 500);
@@ -346,19 +354,19 @@ describe("PI Agent E2E", () => {
     console.log(`[Test] Event count difference: ${diff}`);
     expect(diff).toBeLessThanOrEqual(2);
 
-    // Extract event types from both (filter out user message events)
-    const sub1Types = subscriber1Events
-      .filter((e) => e.type && !e.type.startsWith("iterate:"))
-      .map((e) => e.type);
-    const sub2Types = subscriber2Events
-      .filter((e) => e.type && !e.type.startsWith("iterate:"))
-      .map((e) => e.type);
+    // Extract PI event types from both
+    const sub1PiTypes = subscriber1Events
+      .filter((e) => e.payload?.piEventType)
+      .map((e) => e.payload!.piEventType);
+    const sub2PiTypes = subscriber2Events
+      .filter((e) => e.payload?.piEventType)
+      .map((e) => e.payload!.piEventType);
 
-    console.log(`[Test] Sub1 types: ${sub1Types.join(", ")}`);
-    console.log(`[Test] Sub2 types: ${sub2Types.join(", ")}`);
+    console.log(`[Test] Sub1 PI types: ${sub1PiTypes.join(", ")}`);
+    console.log(`[Test] Sub2 PI types: ${sub2PiTypes.join(", ")}`);
 
-    // Both should have received the same event types in the same order
-    expect(sub1Types).toEqual(sub2Types);
+    // Both should have received the same PI event types in the same order
+    expect(sub1PiTypes).toEqual(sub2PiTypes);
 
     // Both should contain the answer "25"
     const sub1Content = JSON.stringify(subscriber1Events);
@@ -381,17 +389,17 @@ describe("PI Agent E2E", () => {
     // (live subscribers may have aborted before receiving all events)
     expect(subscriber3Events.length).toBeGreaterThanOrEqual(subscriber1Events.length);
     
-    // Extract event types (filter out user message events)
-    const sub3Types = subscriber3Events
-      .filter((e) => e.type && !e.type.startsWith("iterate:"))
-      .map((e) => e.type);
+    // Extract PI event types
+    const sub3PiTypes = subscriber3Events
+      .filter((e) => e.payload?.piEventType)
+      .map((e) => e.payload!.piEventType);
     
-    console.log(`[Test] Sub3 types: ${sub3Types.join(", ")}`);
+    console.log(`[Test] Sub3 PI types: ${sub3PiTypes.join(", ")}`);
     
     // Should have the key events that live subscribers saw
-    expect(sub3Types).toContain("agent_start");
-    expect(sub3Types).toContain("message_start");
-    expect(sub3Types).toContain("message_end");
+    expect(sub3PiTypes).toContain("agent_start");
+    expect(sub3PiTypes).toContain("message_start");
+    expect(sub3PiTypes).toContain("message_end");
     
     // Should contain the answer "25"
     const sub3Content = JSON.stringify(subscriber3Events);

@@ -1,24 +1,24 @@
 /**
- * Durable Stream Reducer
+ * Durable Stream Hook
  *
- * A React hook that consumes an SSE endpoint.
- * Events are expected to include an "offset" field.
- * No control events - just data events.
+ * A React hook that consumes an SSE endpoint with IndexedDB caching.
+ * On page reload, only fetches events since the last cached offset (delta sync).
  */
 
 import { useReducer, useEffect, useRef, useState, useCallback } from "react";
+import {
+  getCachedEvents,
+  appendEvents,
+  clearCache,
+  type StoredEvent,
+} from "@/lib/event-storage";
+import type { ConnectionStatus, StreamEvent } from "@/reducers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface StreamEvent {
-  type: string;
-  offset?: string;
-  [key: string]: unknown;
-}
-
-export interface PersistentStreamConfig<TState, TEvent extends StreamEvent> {
+export interface DurableStreamConfig<TState, TEvent extends StreamEvent> {
   /** SSE endpoint URL. Pass null to disable. */
   url: string | null;
 
@@ -28,20 +28,8 @@ export interface PersistentStreamConfig<TState, TEvent extends StreamEvent> {
   /** Initial state before any events */
   initialState: TState;
 
-  /** Storage key prefix (kept for API compatibility, not used) */
+  /** Storage key for IndexedDB caching (e.g., "agent:/pi/my-session") */
   storageKey: string;
-
-  /**
-   * Filter for persistence (kept for API compatibility, not used).
-   * @default () => true
-   */
-  shouldPersist?: (event: TEvent) => boolean;
-
-  /**
-   * Events to process per batch (kept for API compatibility, not used).
-   * @default 100
-   */
-  replayBatchSize?: number;
 
   /** Called when stream catches up to live */
   onCaughtUp?: () => void;
@@ -56,21 +44,23 @@ export interface PersistentStreamConfig<TState, TEvent extends StreamEvent> {
   suspense?: boolean;
 }
 
-export type ConnectionStatus =
-  | { state: "connecting" }
-  | { state: "connected" }
-  | { state: "error"; message: string }
-  | { state: "closed" };
+/** @deprecated Use DurableStreamConfig instead */
+export type PersistentStreamConfig<TState, TEvent extends StreamEvent> = DurableStreamConfig<TState, TEvent> & {
+  /** @deprecated Not used - filtering happens in event-storage.ts */
+  shouldPersist?: (event: TEvent) => boolean;
+  /** @deprecated Not used */
+  replayBatchSize?: number;
+};
 
-export interface PersistentStreamResult<TState> {
+export interface DurableStreamResult<TState> {
   /** Current reduced state */
   state: TState;
 
   /** True while receiving streaming events (e.g., LLM tokens) */
   isStreaming: boolean;
 
-  /** Clear state and reload (just reloads now) */
-  reset: () => void;
+  /** Clear cache and reload */
+  reset: () => Promise<void>;
 
   /** Current offset (for debugging) */
   offset: string;
@@ -79,23 +69,30 @@ export interface PersistentStreamResult<TState> {
   connectionStatus: ConnectionStatus;
 }
 
+/** @deprecated Use DurableStreamResult instead */
+export type PersistentStreamResult<TState> = DurableStreamResult<TState>;
+
+// Re-export ConnectionStatus for convenience
+export type { ConnectionStatus };
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function usePersistentStream<TState, TEvent extends StreamEvent>({
+export function useDurableStream<TState, TEvent extends StreamEvent>({
   url,
   reducer,
   initialState,
   storageKey,
   onCaughtUp,
   suspense = true,
-}: PersistentStreamConfig<TState, TEvent>): PersistentStreamResult<TState> {
+}: DurableStreamConfig<TState, TEvent>): DurableStreamResult<TState> {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [isStreaming, setIsStreaming] = useState(false);
   const [offset, setOffset] = useState("-1");
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ state: "connecting" });
   const [isReady, setIsReady] = useState(false);
+  const [cacheLoaded, setCacheLoaded] = useState(false);
 
   // Refs for values that shouldn't trigger effect re-runs
   const offsetRef = useRef("-1");
@@ -104,11 +101,55 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
   // Keep refs in sync without triggering effects
   onCaughtUpRef.current = onCaughtUp;
 
-  // SSE connection effect
+  // Load cached events on mount
   useEffect(() => {
-    if (!url) {
-      setConnectionStatus({ state: "closed" });
-      setIsReady(true);
+    if (!storageKey) {
+      setCacheLoaded(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadCache() {
+      try {
+        const cached = await getCachedEvents(storageKey);
+        if (cancelled) return;
+
+        if (cached && cached.events.length > 0) {
+          console.log(`[durable-stream] Loaded ${cached.events.length} cached events, lastOffset: ${cached.lastOffset}`);
+          
+          // Replay cached events through reducer
+          for (const event of cached.events) {
+            dispatch(event as TEvent);
+          }
+
+          // Set offset to continue from where we left off
+          offsetRef.current = cached.lastOffset;
+          setOffset(cached.lastOffset);
+        }
+      } catch (error) {
+        console.warn("[durable-stream] Failed to load cache:", error);
+      } finally {
+        if (!cancelled) {
+          setCacheLoaded(true);
+        }
+      }
+    }
+
+    loadCache();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [storageKey]);
+
+  // SSE connection effect - waits for cache to load first
+  useEffect(() => {
+    if (!url || !cacheLoaded) {
+      if (!url) {
+        setConnectionStatus({ state: "closed" });
+        setIsReady(true);
+      }
       return;
     }
 
@@ -116,11 +157,13 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
     let eventSource: EventSource | null = null;
 
     setConnectionStatus({ state: "connecting" });
-    offsetRef.current = "-1";
-    setOffset("-1");
+
+    // Use cached offset or start from beginning
+    const startOffset = offsetRef.current;
+    console.log(`[durable-stream] Connecting with offset: ${startOffset}`);
 
     const streamUrl = new URL(url, window.location.origin);
-    streamUrl.searchParams.set("offset", "-1");
+    streamUrl.searchParams.set("offset", startOffset);
     streamUrl.searchParams.set("live", "sse");
 
     eventSource = new EventSource(streamUrl.toString());
@@ -133,7 +176,7 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
       }
     };
 
-    // Handle data events (only event type we care about)
+    // Handle data events
     eventSource.addEventListener("data", (evt) => {
       if (cancelled) return;
       try {
@@ -141,6 +184,7 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
 
         // Data can be a single event or an array
         const events: TEvent[] = Array.isArray(data) ? data : [data];
+        const eventsToCache: StoredEvent[] = [];
 
         for (const event of events) {
           if (!event.type) continue;
@@ -151,7 +195,11 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
             setOffset(event.offset);
           }
 
+          // Dispatch to reducer
           dispatch(event);
+
+          // Collect for caching (filtering happens in event-storage.ts)
+          eventsToCache.push(event as StoredEvent);
 
           // Check for streaming events (LLM token streaming)
           const payload =
@@ -176,13 +224,20 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
             setIsStreaming(false);
           }
         }
+
+        // Batch cache new events (filtering happens inside appendEvents)
+        if (eventsToCache.length > 0 && storageKey) {
+          appendEvents(storageKey, eventsToCache, offsetRef.current).catch((err) => {
+            console.warn("[durable-stream] Failed to cache events:", err);
+          });
+        }
       } catch (e) {
-        console.error("[stream] Parse error:", e);
+        console.error("[durable-stream] Parse error:", e);
       }
     });
 
     eventSource.onerror = (err) => {
-      console.error("[stream] SSE connection error:", err);
+      console.error("[durable-stream] SSE connection error:", err);
       if (!cancelled) {
         const es = eventSource;
         if (es?.readyState === EventSource.CLOSED) {
@@ -200,7 +255,7 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
       eventSource?.close();
       setConnectionStatus({ state: "closed" });
     };
-  }, [url, storageKey]);
+  }, [url, storageKey, cacheLoaded]);
 
   // Throw for Suspense if enabled and not ready
   if (suspense && url && !isReady) {
@@ -214,27 +269,21 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
     });
   }
 
-  const reset = useCallback(() => {
+  const reset = useCallback(async () => {
+    if (storageKey) {
+      await clearCache(storageKey);
+    }
     window.location.reload();
-  }, []);
+  }, [storageKey]);
 
   return { state, isStreaming, reset, offset, connectionStatus };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Filters (kept for API compatibility)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function excludeChunks(event: StreamEvent): boolean {
-  return event.type !== "message_updated" && event.type !== "message_chunk";
-}
-
-export function onlyTypes(...types: string[]) {
-  const set = new Set(types);
-  return (event: StreamEvent): boolean => set.has(event.type);
-}
-
-export function excludeTypes(...types: string[]) {
-  const set = new Set(types);
-  return (event: StreamEvent): boolean => !set.has(event.type);
+/** @deprecated Use useDurableStream instead */
+export function usePersistentStream<TState, TEvent extends StreamEvent>(
+  config: PersistentStreamConfig<TState, TEvent>
+): PersistentStreamResult<TState> {
+  // Ignore deprecated fields (shouldPersist, replayBatchSize)
+  // Filtering now happens in event-storage.ts
+  return useDurableStream(config);
 }

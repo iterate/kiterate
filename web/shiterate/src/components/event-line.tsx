@@ -13,7 +13,7 @@ import type {
   CompactionFeedItem,
   RetryFeedItem,
   GroupedEventFeedItem,
-} from "@/reducers/messages-reducer.ts";
+} from "@/reducers";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message.tsx";
 import { Shimmer } from "@/components/ai-elements/shimmer.tsx";
 import {

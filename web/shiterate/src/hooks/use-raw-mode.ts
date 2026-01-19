@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 
 /** Display modes for the feed */
-export type DisplayMode = "pretty" | "raw-pretty" | "raw" | "raw-raw";
+export type DisplayMode = "pretty" | "raw-pretty" | "raw";
 
 export interface DisplayModeContextValue {
   displayMode: DisplayMode;

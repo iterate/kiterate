@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import YAML from "yaml";
 import {
-  reduceEvents,
-  createInitialState,
-  messagesReducer,
+  reducePiEvents,
+  createInitialPiState,
+  piReducer,
   getMessages,
-} from "./messages-reducer.ts";
+} from "./pi";
 
 const PI_EVENT_RECEIVED = "iterate:agent:harness:pi:event-received";
 
@@ -392,11 +392,11 @@ messages:
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("messagesReducer", () => {
+describe("piReducer", () => {
   describe("single turn conversation", () => {
     it("should reduce a complete conversation to messages", () => {
       const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
 
       expect(getMessages(state)).toHaveLength(2);
       expect(state.isStreaming).toBe(false);
@@ -405,7 +405,7 @@ describe("messagesReducer", () => {
 
     it("should have correct user message", () => {
       const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
       const messages = getMessages(state);
 
       expect(messages[0]).toMatchObject({
@@ -416,7 +416,7 @@ describe("messagesReducer", () => {
 
     it("should have correct assistant message", () => {
       const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
       const messages = getMessages(state);
 
       expect(messages[1]).toMatchObject({
@@ -428,7 +428,7 @@ describe("messagesReducer", () => {
 
     it("should track all raw events", () => {
       const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
 
       expect(state.rawEvents).toHaveLength(events.length);
     });
@@ -437,7 +437,7 @@ describe("messagesReducer", () => {
   describe("two turn conversation", () => {
     it("should preserve messages across turns (agent_end should not replace)", () => {
       const events = parseYamlStream(TWO_TURN_YAML);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
 
       // Should have 4 messages: 2 user + 2 assistant
       expect(getMessages(state)).toHaveLength(4);
@@ -446,7 +446,7 @@ describe("messagesReducer", () => {
 
     it("should have all messages in correct order", () => {
       const events = parseYamlStream(TWO_TURN_YAML);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
       const messages = getMessages(state);
 
       expect(messages[0].role).toBe("user");
@@ -465,8 +465,8 @@ describe("messagesReducer", () => {
 
   describe("streaming state", () => {
     it("should set isStreaming=true on assistant message_start", () => {
-      let state = createInitialState();
-      state = messagesReducer(
+      let state = createInitialPiState();
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_start",
@@ -482,15 +482,15 @@ describe("messagesReducer", () => {
     });
 
     it("should update streamingMessage on message_update", () => {
-      let state = createInitialState();
-      state = messagesReducer(
+      let state = createInitialPiState();
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_start",
           message: { role: "assistant", content: [], timestamp: 123 },
         }),
       );
-      state = messagesReducer(
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_update",
@@ -510,15 +510,15 @@ describe("messagesReducer", () => {
     });
 
     it("should finalize message and stop streaming on message_end", () => {
-      let state = createInitialState();
-      state = messagesReducer(
+      let state = createInitialPiState();
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_start",
           message: { role: "assistant", content: [], timestamp: 123 },
         }),
       );
-      state = messagesReducer(
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_end",
@@ -540,8 +540,8 @@ describe("messagesReducer", () => {
 
   describe("user messages from message_end", () => {
     it("should render user message only from message_end, not message_start", () => {
-      let state = createInitialState();
-      state = messagesReducer(
+      let state = createInitialPiState();
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_start",
@@ -555,7 +555,7 @@ describe("messagesReducer", () => {
 
       expect(getMessages(state)).toHaveLength(0);
 
-      state = messagesReducer(
+      state = piReducer(
         state,
         wrapPiEvent({
           type: "message_end",
@@ -573,8 +573,8 @@ describe("messagesReducer", () => {
     });
 
     it("should not render messages from action events", () => {
-      let state = createInitialState();
-      state = messagesReducer(state, {
+      let state = createInitialPiState();
+      state = piReducer(state, {
         type: "iterate:agent:harness:pi:action:prompt:called",
         payload: { content: "hello" },
       });
@@ -586,7 +586,7 @@ describe("messagesReducer", () => {
 
   describe("error events", () => {
     it("should create error feed item from pi harness error", () => {
-      let state = createInitialState();
+      let state = createInitialPiState();
       const errorEvent = {
         type: "iterate:agent:harness:pi:error",
         createdAt: "2026-01-05T20:00:00.000Z",
@@ -596,7 +596,7 @@ describe("messagesReducer", () => {
           stack: "Error: Authentication failed\n    at handleSessionCreate",
         },
       };
-      state = messagesReducer(state, errorEvent);
+      state = piReducer(state, errorEvent);
 
       expect(state.feed).toHaveLength(1);
       const feedItem = state.feed[0];
@@ -614,8 +614,8 @@ describe("messagesReducer", () => {
     });
 
     it("should handle error event with missing payload fields", () => {
-      let state = createInitialState();
-      state = messagesReducer(state, {
+      let state = createInitialPiState();
+      state = piReducer(state, {
         type: "iterate:agent:harness:pi:error",
         createdAt: "2026-01-05T20:00:00.000Z",
         payload: {},
@@ -628,8 +628,8 @@ describe("messagesReducer", () => {
     });
 
     it("should handle error event without payload", () => {
-      let state = createInitialState();
-      state = messagesReducer(state, {
+      let state = createInitialPiState();
+      state = piReducer(state, {
         type: "iterate:agent:harness:pi:error",
         createdAt: "2026-01-05T20:00:00.000Z",
       });
@@ -643,7 +643,7 @@ describe("messagesReducer", () => {
 
   describe("edge cases", () => {
     it("should handle empty events array", () => {
-      const state = reduceEvents([]);
+      const state = reducePiEvents([]);
 
       expect(getMessages(state)).toHaveLength(0);
       expect(state.isStreaming).toBe(false);
@@ -651,17 +651,17 @@ describe("messagesReducer", () => {
     });
 
     it("should pass through unknown event types", () => {
-      let state = createInitialState();
-      state = messagesReducer(state, { type: "some:unknown:event", data: "test" });
+      let state = createInitialPiState();
+      state = piReducer(state, { type: "some:unknown:event", data: "test" });
 
       expect(getMessages(state)).toHaveLength(0);
       expect(state.rawEvents).toHaveLength(1);
     });
 
     it("should handle turn_start and agent_start events gracefully", () => {
-      let state = createInitialState();
-      state = messagesReducer(state, wrapPiEvent({ type: "turn_start" }));
-      state = messagesReducer(state, wrapPiEvent({ type: "agent_start" }));
+      let state = createInitialPiState();
+      state = piReducer(state, wrapPiEvent({ type: "turn_start" }));
+      state = piReducer(state, wrapPiEvent({ type: "agent_start" }));
 
       expect(getMessages(state)).toHaveLength(0);
       expect(state.rawEvents).toHaveLength(2);
@@ -687,7 +687,7 @@ describe("messagesReducer", () => {
       }
 
       const events = parseYamlStream(yamlContent);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
 
       // Based on the hi.yaml content, we expect:
       // - User: "haha"
@@ -725,7 +725,7 @@ describe("messagesReducer", () => {
       const events = parseYamlStream(yamlContent);
 
       // This should not throw
-      expect(() => reduceEvents(events)).not.toThrow();
+      expect(() => reducePiEvents(events)).not.toThrow();
     });
 
     it("should track all raw events from real data", () => {
@@ -736,7 +736,7 @@ describe("messagesReducer", () => {
       }
 
       const events = parseYamlStream(yamlContent);
-      const state = reduceEvents(events);
+      const state = reducePiEvents(events);
 
       // All events should be tracked
       expect(state.rawEvents).toHaveLength(events.length);

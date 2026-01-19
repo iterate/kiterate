@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import type { ConnectionStatus } from "@/reducers/durable-stream-reducer";
+import type { ConnectionStatus } from "@/reducers";
 
 export function App() {
   const apiURL = useMemo(() => new URL("/", window.location.href).toString(), []);

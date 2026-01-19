@@ -1,4 +1,6 @@
 /**
+ * PI Reducer
+ *
  * Pure reducer for transforming Pi agent events into a unified feed.
  * This module has no side effects and can be easily unit tested.
  *
@@ -160,7 +162,7 @@ interface ActiveReasoning {
   feedIndex: number; // index in feed array for updates
 }
 
-export interface MessagesState {
+export interface PiState {
   feed: FeedItem[];
   isStreaming: boolean;
   streamingMessage?: MessageFeedItem;
@@ -176,6 +178,9 @@ export interface MessagesState {
   activeRetry?: { feedIndex: number; startTimestamp: number };
 }
 
+/** @deprecated Use PiState instead */
+export type MessagesState = PiState;
+
 const PI_EVENT_RECEIVED = "iterate:agent:harness:pi:event-received";
 const PI_ERROR = "iterate:agent:harness:pi:error";
 
@@ -183,7 +188,7 @@ const PI_ERROR = "iterate:agent:harness:pi:error";
 // Initial State
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function createInitialState(): MessagesState {
+export function createInitialPiState(): PiState {
   return {
     feed: [],
     isStreaming: false,
@@ -196,6 +201,9 @@ export function createInitialState(): MessagesState {
     activeRetry: undefined,
   };
 }
+
+/** @deprecated Use createInitialPiState instead */
+export const createInitialState = createInitialPiState;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -323,7 +331,7 @@ function extractPiEvent(e: Record<string, unknown>): Record<string, unknown> | n
 // Reducer
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function messagesReducer(state: MessagesState, event: unknown): MessagesState {
+export function piReducer(state: PiState, event: unknown): PiState {
   const e = event as Record<string, unknown>;
   const rawEvents = [...state.rawEvents, event];
   const timestamp = getTimestamp(e);
@@ -815,6 +823,9 @@ export function messagesReducer(state: MessagesState, event: unknown): MessagesS
   };
 }
 
+/** @deprecated Use piReducer instead */
+export const messagesReducer = piReducer;
+
 /**
  * Extract error text from a tool result.
  * Tool results may be structured objects or simple strings.
@@ -839,46 +850,49 @@ function extractErrorText(result: unknown): string {
 // Helper: Reduce all events from a stream
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function reduceEvents(events: unknown[]): MessagesState {
-  return events.reduce(messagesReducer, createInitialState());
+export function reducePiEvents(events: unknown[]): PiState {
+  return events.reduce(piReducer, createInitialPiState());
 }
+
+/** @deprecated Use reducePiEvents instead */
+export const reduceEvents = reducePiEvents;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Selectors: Filter feed items by kind
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Get all message feed items */
-export function getMessages(state: MessagesState): MessageFeedItem[] {
+export function getMessages(state: PiState): MessageFeedItem[] {
   return state.feed.filter((item): item is MessageFeedItem => item.kind === "message");
 }
 
 /** Get all tool execution feed items */
-export function getTools(state: MessagesState): ToolFeedItem[] {
+export function getTools(state: PiState): ToolFeedItem[] {
   return state.feed.filter((item): item is ToolFeedItem => item.kind === "tool");
 }
 
 /** Get all reasoning feed items */
-export function getReasoning(state: MessagesState): ReasoningFeedItem[] {
+export function getReasoning(state: PiState): ReasoningFeedItem[] {
   return state.feed.filter((item): item is ReasoningFeedItem => item.kind === "reasoning");
 }
 
 /** Get all compaction feed items */
-export function getCompactions(state: MessagesState): CompactionFeedItem[] {
+export function getCompactions(state: PiState): CompactionFeedItem[] {
   return state.feed.filter((item): item is CompactionFeedItem => item.kind === "compaction");
 }
 
 /** Get all retry feed items */
-export function getRetries(state: MessagesState): RetryFeedItem[] {
+export function getRetries(state: PiState): RetryFeedItem[] {
   return state.feed.filter((item): item is RetryFeedItem => item.kind === "retry");
 }
 
 /** Get all error feed items */
-export function getErrors(state: MessagesState): ErrorFeedItem[] {
+export function getErrors(state: PiState): ErrorFeedItem[] {
   return state.feed.filter((item): item is ErrorFeedItem => item.kind === "error");
 }
 
 /** Get all generic event feed items */
-export function getEvents(state: MessagesState): EventFeedItem[] {
+export function getEvents(state: PiState): EventFeedItem[] {
   return state.feed.filter((item): item is EventFeedItem => item.kind === "event");
 }
 
@@ -886,27 +900,27 @@ export function getEvents(state: MessagesState): EventFeedItem[] {
  * Get active/pending tools (tools that haven't completed yet).
  * Useful for showing progress indicators.
  */
-export function getActiveTools(state: MessagesState): ToolFeedItem[] {
+export function getActiveTools(state: PiState): ToolFeedItem[] {
   return getTools(state).filter((t) => t.state === "pending" || t.state === "running");
 }
 
 /**
  * Check if there's an active reasoning block being streamed.
  */
-export function isReasoningActive(state: MessagesState): boolean {
+export function isReasoningActive(state: PiState): boolean {
   return state.activeReasoning !== undefined;
 }
 
 /**
  * Check if there's an active compaction in progress.
  */
-export function isCompactionActive(state: MessagesState): boolean {
+export function isCompactionActive(state: PiState): boolean {
   return state.activeCompaction !== undefined;
 }
 
 /**
  * Check if there's an active retry in progress.
  */
-export function isRetryActive(state: MessagesState): boolean {
+export function isRetryActive(state: PiState): boolean {
   return state.activeRetry !== undefined;
 }

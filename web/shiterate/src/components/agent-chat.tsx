@@ -3,14 +3,15 @@ import { MessageSquareIcon, CodeIcon, MessageCircleIcon, AlertCircleIcon } from 
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
-  messagesReducer,
-  createInitialState,
-  type MessagesState,
+  piReducer,
+  createInitialPiState,
+  type PiState,
   type FeedItem,
   type EventFeedItem,
   type GroupedEventFeedItem,
-} from "@/reducers/messages-reducer";
-import { usePersistentStream, excludeTypes, type ConnectionStatus } from "@/reducers/durable-stream-reducer";
+  type ConnectionStatus,
+} from "@/reducers";
+import { useDurableStream } from "@/hooks/use-durable-stream";
 import { useRawMode, type DisplayMode } from "@/hooks/use-raw-mode";
 import { useJsonInput } from "@/hooks/use-json-input";
 import {
@@ -153,52 +154,40 @@ function buildDisplayFeed(
   }
 
   // "raw-pretty" mode: Show everything, group consecutive events of same type
-  // Group raw events FIRST based on their original order (not affected by pretty items)
-  // Then interleave groups with pretty items by timestamp
+  // Events are already in correct order from the store (by offset).
+  // We group consecutive event items by type while preserving the overall order.
   
-  // First, get all raw events as EventFeedItems
-  const allRawEvents = rawEvents.map(toRawEventItem);
-  
-  // Get the pretty items (non-event items) from feed
-  const prettyItems = feed.filter((item) => item.kind !== "event");
-  
-  // Group consecutive raw events by type (in their original order)
-  const rawGroups: FeedItem[] = [];
+  const result: FeedItem[] = [];
   let currentGroup: { typeKey: string; events: EventFeedItem[] } | null = null;
   
-  for (const event of allRawEvents) {
-    const typeKey = getEventTypeKey(event.raw);
-    
-    if (currentGroup && currentGroup.typeKey === typeKey) {
-      currentGroup.events.push(event);
-    } else {
-      if (currentGroup) {
-        rawGroups.push(createGroupedOrSingleEvent(currentGroup.events));
+  for (const item of feed) {
+    if (item.kind === "event") {
+      const typeKey = item.eventType;
+      
+      if (currentGroup && currentGroup.typeKey === typeKey) {
+        currentGroup.events.push(item);
+      } else {
+        if (currentGroup) {
+          result.push(createGroupedOrSingleEvent(currentGroup.events));
+        }
+        currentGroup = { typeKey, events: [item] };
       }
-      currentGroup = { typeKey, events: [event] };
+    } else {
+      // Non-event item - flush any pending group first
+      if (currentGroup) {
+        result.push(createGroupedOrSingleEvent(currentGroup.events));
+        currentGroup = null;
+      }
+      result.push(item);
     }
   }
   
+  // Flush any remaining group
   if (currentGroup) {
-    rawGroups.push(createGroupedOrSingleEvent(currentGroup.events));
+    result.push(createGroupedOrSingleEvent(currentGroup.events));
   }
   
-  // Now interleave raw groups with pretty items by timestamp
-  type TimestampedItem = { timestamp: number; item: FeedItem };
-  const timestampedItems: TimestampedItem[] = [
-    ...rawGroups.map((item) => {
-      const ts = item.kind === "grouped-event" ? item.firstTimestamp : 
-                 item.kind === "event" ? item.timestamp : Date.now();
-      return { timestamp: ts, item };
-    }),
-    ...prettyItems.map((item) => {
-      const ts = getItemTimestamp(item);
-      return { timestamp: ts, item };
-    }),
-  ];
-  
-  timestampedItems.sort((a, b) => a.timestamp - b.timestamp);
-  return timestampedItems.map(({ item }) => item);
+  return result;
 }
 
 /** Create a grouped event or single event depending on count */
@@ -235,12 +224,11 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     state: { feed, isStreaming: stateIsStreaming, streamingMessage, rawEvents },
     isStreaming: hookIsStreaming,
     connectionStatus,
-  } = usePersistentStream<MessagesState, { type: string; [key: string]: unknown }>({
+  } = useDurableStream<PiState, { type: string; [key: string]: unknown }>({
     url: buildAgentURL(apiURL, agentPath),
     storageKey: `agent:${agentPath}`,
-    reducer: messagesReducer,
-    initialState: createInitialState(),
-    shouldPersist: excludeTypes("message_update"),
+    reducer: piReducer,
+    initialState: createInitialPiState(),
     suspense: false,
   });
 

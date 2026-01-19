@@ -5,7 +5,7 @@ import { DisplayModeContext, type DisplayMode } from "./use-raw-mode.ts";
 const STORAGE_KEY = "daemon:displayMode";
 
 function isValidDisplayMode(value: string | null): value is DisplayMode {
-  return value === "pretty" || value === "raw-pretty" || value === "raw" || value === "raw-raw";
+  return value === "pretty" || value === "raw-pretty" || value === "raw";
 }
 
 function getInitialDisplayMode(): DisplayMode {
