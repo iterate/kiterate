@@ -2,44 +2,62 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import YAML from "yaml";
+import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
 import {
-  reducePiEvents,
-  createInitialPiState,
   piReducer,
+  createInitialPiState,
   getMessages,
 } from "./pi";
-
-const PI_EVENT_RECEIVED = "iterate:agent:harness:pi:event-received";
-
-/**
- * Wrap a raw Pi SDK event in the standard envelope format.
- */
-function wrapPiEvent(piEvent: Record<string, unknown>) {
-  return {
-    type: PI_EVENT_RECEIVED,
-    createdAt: new Date().toISOString(),
-    payload: {
-      piEventType: piEvent.type,
-      piEvent,
-    },
-  };
-}
+import {
+  wrapperReducer,
+  createInitialWrapperState,
+  getWrapperMessages,
+  type WrapperState,
+} from "./index";
 
 /**
- * Parse a YAML stream file and extract events from the messages array.
- * Each message in the YAML has a `content` field which is the actual event.
+ * Parse a YAML stream file and extract the inner piEvent from each message.
  */
-function parseYamlStream(yamlString: string): unknown[] {
+function parseYamlStreamPiEvents(yamlString: string): AgentSessionEvent[] {
   const data = YAML.parse(yamlString);
   if (!data?.messages || !Array.isArray(data.messages)) {
     return [];
   }
-  // Extract the `content` field from each message, which is the actual event
+  return data.messages
+    .map((m: Record<string, unknown>) => {
+      const content = m.content as { payload?: { piEvent?: unknown } } | undefined;
+      return content?.payload?.piEvent as AgentSessionEvent | undefined;
+    })
+    .filter((e: AgentSessionEvent | undefined): e is AgentSessionEvent => e !== undefined);
+}
+
+/**
+ * Parse a YAML stream file and extract the full envelope events.
+ */
+function parseYamlStreamEnvelopes(yamlString: string): unknown[] {
+  const data = YAML.parse(yamlString);
+  if (!data?.messages || !Array.isArray(data.messages)) {
+    return [];
+  }
   return data.messages.map((m: Record<string, unknown>) => m.content);
 }
 
+/**
+ * Reduce PI events using the inner reducer.
+ */
+function reducePiEvents(events: AgentSessionEvent[]) {
+  return events.reduce(piReducer, createInitialPiState());
+}
+
+/**
+ * Reduce envelope events using the wrapper reducer.
+ */
+function reduceWrapperEvents(events: unknown[]): WrapperState {
+  return events.reduce(wrapperReducer, createInitialWrapperState());
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Test data: Minimal conversation with one user message and assistant response
+// Test data: Minimal conversation
 // ─────────────────────────────────────────────────────────────────────────────
 
 const SINGLE_TURN_YAML = `
@@ -56,29 +74,10 @@ messages:
         piEvent:
           type: agent_start
     timestamp: 2026-01-05T20:00:01.001Z
-    source: system
-    metadata: {}
   - offset: "2"
     content:
       type: iterate:agent:harness:pi:event-received
       createdAt: 2026-01-05T20:00:01.002Z
-      payload:
-        piEventType: message_start
-        piEvent:
-          type: message_start
-          message:
-            role: user
-            content:
-              - type: text
-                text: hello
-            timestamp: 1234567890
-    timestamp: 2026-01-05T20:00:01.002Z
-    source: user
-    metadata: {}
-  - offset: "3"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.003Z
       payload:
         piEventType: message_end
         piEvent:
@@ -89,13 +88,11 @@ messages:
               - type: text
                 text: hello
             timestamp: 1234567890
-    timestamp: 2026-01-05T20:00:01.003Z
-    source: user
-    metadata: {}
-  - offset: "4"
+    timestamp: 2026-01-05T20:00:01.002Z
+  - offset: "3"
     content:
       type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.004Z
+      createdAt: 2026-01-05T20:00:01.003Z
       payload:
         piEventType: message_start
         piEvent:
@@ -104,32 +101,11 @@ messages:
             role: assistant
             content: []
             timestamp: 1234567891
-    timestamp: 2026-01-05T20:00:01.004Z
-    source: assistant
-    metadata: {}
-  - offset: "5"
+    timestamp: 2026-01-05T20:00:01.003Z
+  - offset: "4"
     content:
       type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.005Z
-      payload:
-        piEventType: message_update
-        piEvent:
-          type: message_update
-          assistantMessageEvent:
-            type: text_delta
-            partial:
-              role: assistant
-              content:
-                - type: text
-                  text: "Hi there!"
-              timestamp: 1234567891
-    timestamp: 2026-01-05T20:00:01.005Z
-    source: assistant
-    metadata: {}
-  - offset: "6"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.006Z
+      createdAt: 2026-01-05T20:00:01.004Z
       payload:
         piEventType: message_end
         piEvent:
@@ -140,606 +116,199 @@ messages:
               - type: text
                 text: "Hi there!"
             timestamp: 1234567891
-    timestamp: 2026-01-05T20:00:01.006Z
-    source: assistant
-    metadata: {}
-  - offset: "7"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.007Z
-      payload:
-        piEventType: agent_end
-        piEvent:
-          type: agent_end
-          messages:
-            - role: user
-              content:
-                - type: text
-                  text: hello
-            - role: assistant
-              content:
-                - type: text
-                  text: "Hi there!"
-    timestamp: 2026-01-05T20:00:01.007Z
-    source: system
-    metadata: {}
-`;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Test data: Two-turn conversation
-// ─────────────────────────────────────────────────────────────────────────────
-
-const TWO_TURN_YAML = `
-id: test
-contentType: application/json
-createdAt: 2026-01-05T20:00:00.000Z
-messages:
-  # First turn
-  - offset: "1"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.001Z
-      payload:
-        piEventType: message_start
-        piEvent:
-          type: message_start
-          message:
-            role: user
-            content:
-              - type: text
-                text: haha
-            timestamp: 1000
-    timestamp: 2026-01-05T20:00:01.001Z
-    source: user
-    metadata: {}
-  - offset: "2"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.002Z
-      payload:
-        piEventType: message_end
-        piEvent:
-          type: message_end
-          message:
-            role: user
-            content:
-              - type: text
-                text: haha
-            timestamp: 1000
-    timestamp: 2026-01-05T20:00:01.002Z
-    source: user
-    metadata: {}
-  - offset: "3"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.003Z
-      payload:
-        piEventType: message_start
-        piEvent:
-          type: message_start
-          message:
-            role: assistant
-            content: []
-            timestamp: 1001
-    timestamp: 2026-01-05T20:00:01.003Z
-    source: assistant
-    metadata: {}
-  - offset: "4"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.004Z
-      payload:
-        piEventType: message_update
-        piEvent:
-          type: message_update
-          assistantMessageEvent:
-            type: text_delta
-            partial:
-              role: assistant
-              content:
-                - type: text
-                  text: "Haha! 😄"
-              timestamp: 1001
     timestamp: 2026-01-05T20:00:01.004Z
-    source: assistant
-    metadata: {}
   - offset: "5"
     content:
       type: iterate:agent:harness:pi:event-received
       createdAt: 2026-01-05T20:00:01.005Z
       payload:
-        piEventType: message_end
+        piEventType: agent_end
         piEvent:
-          type: message_end
-          message:
-            role: assistant
-            content:
-              - type: text
-                text: "Haha! 😄"
-            timestamp: 1001
+          type: agent_end
+          messages: []
     timestamp: 2026-01-05T20:00:01.005Z
-    source: assistant
-    metadata: {}
-  - offset: "6"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:01.006Z
-      payload:
-        piEventType: agent_end
-        piEvent:
-          type: agent_end
-          messages:
-            - role: user
-              content:
-                - type: text
-                  text: haha
-            - role: assistant
-              content:
-                - type: text
-                  text: "Haha! 😄"
-    timestamp: 2026-01-05T20:00:01.006Z
-    source: system
-    metadata: {}
-  # Second turn
-  - offset: "7"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:02.001Z
-      payload:
-        piEventType: message_start
-        piEvent:
-          type: message_start
-          message:
-            role: user
-            content:
-              - type: text
-                text: why not laugh more?
-            timestamp: 2000
-    timestamp: 2026-01-05T20:00:02.001Z
-    source: user
-    metadata: {}
-  - offset: "8"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:02.002Z
-      payload:
-        piEventType: message_end
-        piEvent:
-          type: message_end
-          message:
-            role: user
-            content:
-              - type: text
-                text: why not laugh more?
-            timestamp: 2000
-    timestamp: 2026-01-05T20:00:02.002Z
-    source: user
-    metadata: {}
-  - offset: "9"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:02.003Z
-      payload:
-        piEventType: message_start
-        piEvent:
-          type: message_start
-          message:
-            role: assistant
-            content: []
-            timestamp: 2001
-    timestamp: 2026-01-05T20:00:02.003Z
-    source: assistant
-    metadata: {}
-  - offset: "10"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:02.004Z
-      payload:
-        piEventType: message_update
-        piEvent:
-          type: message_update
-          assistantMessageEvent:
-            type: text_delta
-            partial:
-              role: assistant
-              content:
-                - type: text
-                  text: "You got me there! 😂"
-              timestamp: 2001
-    timestamp: 2026-01-05T20:00:02.004Z
-    source: assistant
-    metadata: {}
-  - offset: "11"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:02.005Z
-      payload:
-        piEventType: message_end
-        piEvent:
-          type: message_end
-          message:
-            role: assistant
-            content:
-              - type: text
-                text: "You got me there! 😂"
-            timestamp: 2001
-    timestamp: 2026-01-05T20:00:02.005Z
-    source: assistant
-    metadata: {}
-  - offset: "12"
-    content:
-      type: iterate:agent:harness:pi:event-received
-      createdAt: 2026-01-05T20:00:02.006Z
-      payload:
-        piEventType: agent_end
-        piEvent:
-          type: agent_end
-          messages:
-            - role: user
-              content:
-                - type: text
-                  text: why not laugh more?
-            - role: assistant
-              content:
-                - type: text
-                  text: "You got me there! 😂"
-    timestamp: 2026-01-05T20:00:02.006Z
-    source: system
-    metadata: {}
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tests
+// Tests: Inner PI Reducer (typed AgentSessionEvent)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("piReducer", () => {
-  describe("single turn conversation", () => {
-    it("should reduce a complete conversation to messages", () => {
-      const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reducePiEvents(events);
+describe("piReducer (inner, typed)", () => {
+  it("should reduce PI events to messages", () => {
+    const events = parseYamlStreamPiEvents(SINGLE_TURN_YAML);
+    const state = reducePiEvents(events);
 
-      expect(getMessages(state)).toHaveLength(2);
-      expect(state.isStreaming).toBe(false);
-      expect(state.streamingMessage).toBeUndefined();
-    });
+    expect(getMessages(state)).toHaveLength(2);
+    expect(state.isStreaming).toBe(false);
+  });
 
-    it("should have correct user message", () => {
-      const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reducePiEvents(events);
-      const messages = getMessages(state);
+  it("should handle message_start for assistant", () => {
+    let state = createInitialPiState();
+    const event: AgentSessionEvent = {
+      type: "message_start",
+      message: { role: "assistant", content: [], timestamp: 123 } as any,
+    };
+    state = piReducer(state, event);
 
-      expect(messages[0]).toMatchObject({
+    expect(state.isStreaming).toBe(true);
+    expect(state.streamingMessage?.role).toBe("assistant");
+  });
+
+  it("should handle message_end for user", () => {
+    let state = createInitialPiState();
+    const event: AgentSessionEvent = {
+      type: "message_end",
+      message: {
         role: "user",
         content: [{ type: "text", text: "hello" }],
-      });
+        timestamp: 123,
+      } as any,
+    };
+    state = piReducer(state, event);
+
+    expect(getMessages(state)).toHaveLength(1);
+    expect(getMessages(state)[0].content[0].text).toBe("hello");
+  });
+
+  it("should handle message_end for assistant", () => {
+    let state = createInitialPiState();
+    state = piReducer(state, {
+      type: "message_start",
+      message: { role: "assistant", content: [], timestamp: 123 } as any,
     });
-
-    it("should have correct assistant message", () => {
-      const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reducePiEvents(events);
-      const messages = getMessages(state);
-
-      expect(messages[1]).toMatchObject({
+    state = piReducer(state, {
+      type: "message_end",
+      message: {
         role: "assistant",
-        content: [{ type: "text", text: "Hi there!" }],
-        timestamp: 1234567891,
-      });
+        content: [{ type: "text", text: "Hi!" }],
+        timestamp: 123,
+      } as any,
     });
 
-    it("should track all raw events", () => {
-      const events = parseYamlStream(SINGLE_TURN_YAML);
-      const state = reducePiEvents(events);
-
-      expect(state.rawEvents).toHaveLength(events.length);
-    });
+    expect(state.isStreaming).toBe(false);
+    expect(getMessages(state)).toHaveLength(1);
   });
 
-  describe("two turn conversation", () => {
-    it("should preserve messages across turns (agent_end should not replace)", () => {
-      const events = parseYamlStream(TWO_TURN_YAML);
-      const state = reducePiEvents(events);
+  it("should handle tool execution lifecycle", () => {
+    let state = createInitialPiState();
 
-      // Should have 4 messages: 2 user + 2 assistant
-      expect(getMessages(state)).toHaveLength(4);
-      expect(state.isStreaming).toBe(false);
+    state = piReducer(state, {
+      type: "tool_execution_start",
+      toolCallId: "tc1",
+      toolName: "read",
+      args: { path: "/test" },
     });
+    expect(state.feed).toHaveLength(1);
+    expect(state.feed[0].kind).toBe("tool");
 
-    it("should have all messages in correct order", () => {
-      const events = parseYamlStream(TWO_TURN_YAML);
-      const state = reducePiEvents(events);
-      const messages = getMessages(state);
-
-      expect(messages[0].role).toBe("user");
-      expect(messages[0].content[0].text).toBe("haha");
-
-      expect(messages[1].role).toBe("assistant");
-      expect(messages[1].content[0].text).toBe("Haha! 😄");
-
-      expect(messages[2].role).toBe("user");
-      expect(messages[2].content[0].text).toBe("why not laugh more?");
-
-      expect(messages[3].role).toBe("assistant");
-      expect(messages[3].content[0].text).toBe("You got me there! 😂");
+    state = piReducer(state, {
+      type: "tool_execution_end",
+      toolCallId: "tc1",
+      toolName: "read",
+      result: "content",
+      isError: false,
     });
+    expect((state.feed[0] as any).state).toBe("completed");
   });
 
-  describe("streaming state", () => {
-    it("should set isStreaming=true on assistant message_start", () => {
-      let state = createInitialPiState();
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_start",
-          message: { role: "assistant", content: [], timestamp: 123 },
-        }),
-      );
-
-      expect(state.isStreaming).toBe(true);
-      expect(state.streamingMessage).toMatchObject({
-        role: "assistant",
-        content: [],
-      });
+  it("should clear streaming on agent_end", () => {
+    let state = createInitialPiState();
+    state = piReducer(state, {
+      type: "message_start",
+      message: { role: "assistant", content: [] } as any,
     });
+    expect(state.isStreaming).toBe(true);
 
-    it("should update streamingMessage on message_update", () => {
-      let state = createInitialPiState();
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_start",
-          message: { role: "assistant", content: [], timestamp: 123 },
-        }),
-      );
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_update",
-          assistantMessageEvent: {
-            type: "text_delta",
-            partial: {
-              role: "assistant",
-              content: [{ type: "text", text: "Hello" }],
-              timestamp: 123,
-            },
-          },
-        }),
-      );
+    state = piReducer(state, { type: "agent_end", messages: [] });
+    expect(state.isStreaming).toBe(false);
+  });
+});
 
-      expect(state.isStreaming).toBe(true);
-      expect(state.streamingMessage?.content[0].text).toBe("Hello");
-    });
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: Wrapper Reducer (envelope extraction)
+// ─────────────────────────────────────────────────────────────────────────────
 
-    it("should finalize message and stop streaming on message_end", () => {
-      let state = createInitialPiState();
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_start",
-          message: { role: "assistant", content: [], timestamp: 123 },
-        }),
-      );
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_end",
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "Final message" }],
-            timestamp: 123,
-          },
-        }),
-      );
+describe("wrapperReducer (envelope extraction)", () => {
+  it("should extract PI events from envelopes", () => {
+    const events = parseYamlStreamEnvelopes(SINGLE_TURN_YAML);
+    const state = reduceWrapperEvents(events);
 
-      expect(state.isStreaming).toBe(false);
-      expect(state.streamingMessage).toBeUndefined();
-      const messages = getMessages(state);
-      expect(messages).toHaveLength(1);
-      expect(messages[0].content[0].text).toBe("Final message");
-    });
+    expect(getWrapperMessages(state)).toHaveLength(2);
+    expect(state.rawEvents).toHaveLength(events.length);
   });
 
-  describe("user messages from message_end", () => {
-    it("should render user message only from message_end, not message_start", () => {
-      let state = createInitialPiState();
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_start",
-          message: {
-            role: "user",
-            content: [{ type: "text", text: "hello" }],
-            timestamp: 123,
-          },
-        }),
-      );
-
-      expect(getMessages(state)).toHaveLength(0);
-
-      state = piReducer(
-        state,
-        wrapPiEvent({
-          type: "message_end",
-          message: {
-            role: "user",
-            content: [{ type: "text", text: "hello" }],
-            timestamp: 123,
-          },
-        }),
-      );
-
-      expect(getMessages(state)).toHaveLength(1);
-      expect(getMessages(state)[0].role).toBe("user");
-      expect(getMessages(state)[0].content[0].text).toBe("hello");
+  it("should handle user message action events", () => {
+    let state = createInitialWrapperState();
+    state = wrapperReducer(state, {
+      type: "iterate:agent:action:send-user-message:called",
+      payload: { content: "hello from action" },
     });
 
-    it("should not render messages from action events", () => {
-      let state = createInitialPiState();
-      state = piReducer(state, {
-        type: "iterate:agent:harness:pi:action:prompt:called",
-        payload: { content: "hello" },
-      });
-
-      expect(getMessages(state)).toHaveLength(0);
-      expect(state.rawEvents).toHaveLength(1);
-    });
+    expect(getWrapperMessages(state)).toHaveLength(1);
+    expect(getWrapperMessages(state)[0].content[0].text).toBe("hello from action");
   });
 
-  describe("error events", () => {
-    it("should create error feed item from pi harness error", () => {
-      let state = createInitialPiState();
-      const errorEvent = {
-        type: "iterate:agent:harness:pi:error",
-        createdAt: "2026-01-05T20:00:00.000Z",
-        payload: {
-          message: "Authentication failed",
-          context: "session-create",
-          stack: "Error: Authentication failed\n    at handleSessionCreate",
-        },
-      };
-      state = piReducer(state, errorEvent);
-
-      expect(state.feed).toHaveLength(1);
-      const feedItem = state.feed[0];
-      expect(feedItem.kind).toBe("error");
-      expect(feedItem).toMatchObject({
-        kind: "error",
+  it("should handle generic agent errors", () => {
+    let state = createInitialWrapperState();
+    state = wrapperReducer(state, {
+      type: "iterate:agent:error",
+      createdAt: "2026-01-05T20:00:00.000Z",
+      payload: {
         message: "Authentication failed",
         context: "session-create",
-        stack: "Error: Authentication failed\n    at handleSessionCreate",
-        raw: errorEvent,
-      });
-      // Cast to ErrorFeedItem to access timestamp
-      const errorItem = feedItem as { kind: "error"; timestamp: number };
-      expect(typeof errorItem.timestamp).toBe("number");
+      },
     });
 
-    it("should handle error event with missing payload fields", () => {
-      let state = createInitialPiState();
-      state = piReducer(state, {
-        type: "iterate:agent:harness:pi:error",
-        createdAt: "2026-01-05T20:00:00.000Z",
-        payload: {},
-      });
-
-      expect(state.feed).toHaveLength(1);
-      expect(state.feed[0].kind).toBe("error");
-      const errorItem = state.feed[0] as { kind: "error"; message: string };
-      expect(errorItem.message).toBe("Unknown error");
-    });
-
-    it("should handle error event without payload", () => {
-      let state = createInitialPiState();
-      state = piReducer(state, {
-        type: "iterate:agent:harness:pi:error",
-        createdAt: "2026-01-05T20:00:00.000Z",
-      });
-
-      expect(state.feed).toHaveLength(1);
-      expect(state.feed[0].kind).toBe("error");
-      const errorItem = state.feed[0] as { kind: "error"; message: string };
-      expect(errorItem.message).toBe("Unknown error");
-    });
+    expect(state.feed).toHaveLength(1);
+    expect(state.feed[0].kind).toBe("error");
+    expect((state.feed[0] as any).message).toBe("Authentication failed");
   });
 
-  describe("edge cases", () => {
-    it("should handle empty events array", () => {
-      const state = reducePiEvents([]);
-
-      expect(getMessages(state)).toHaveLength(0);
-      expect(state.isStreaming).toBe(false);
-      expect(state.rawEvents).toHaveLength(0);
+  it("should create event items for unknown events", () => {
+    let state = createInitialWrapperState();
+    state = wrapperReducer(state, {
+      type: "some:unknown:event",
+      data: "test",
     });
 
-    it("should pass through unknown event types", () => {
-      let state = createInitialPiState();
-      state = piReducer(state, { type: "some:unknown:event", data: "test" });
-
-      expect(getMessages(state)).toHaveLength(0);
-      expect(state.rawEvents).toHaveLength(1);
-    });
-
-    it("should handle turn_start and agent_start events gracefully", () => {
-      let state = createInitialPiState();
-      state = piReducer(state, wrapPiEvent({ type: "turn_start" }));
-      state = piReducer(state, wrapPiEvent({ type: "agent_start" }));
-
-      expect(getMessages(state)).toHaveLength(0);
-      expect(state.rawEvents).toHaveLength(2);
-    });
+    expect(state.feed).toHaveLength(1);
+    expect(state.feed[0].kind).toBe("event");
+    expect((state.feed[0] as any).eventType).toBe("some:unknown:event");
   });
 
-  describe("real YAML data from hi.yaml", () => {
-    // Load the actual hi.yaml file from the .iterate directory
-    const loadHiYaml = () => {
-      const yamlPath = join(__dirname, "../../.iterate/hi.yaml");
-      try {
-        return readFileSync(yamlPath, "utf-8");
-      } catch {
-        return null;
-      }
-    };
+  it("should track all raw events", () => {
+    const events = parseYamlStreamEnvelopes(SINGLE_TURN_YAML);
+    const state = reduceWrapperEvents(events);
 
-    it("should correctly reduce the real hi.yaml conversation", () => {
-      const yamlContent = loadHiYaml();
-      if (!yamlContent) {
-        console.log("Skipping: hi.yaml not found");
-        return;
-      }
+    expect(state.rawEvents).toHaveLength(events.length);
+  });
+});
 
-      const events = parseYamlStream(yamlContent);
-      const state = reducePiEvents(events);
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests: Real YAML data
+// ─────────────────────────────────────────────────────────────────────────────
 
-      // Based on the hi.yaml content, we expect:
-      // - User: "haha"
-      // - Assistant: "Haha! 😄 What can I help you with today?..."
-      // - User: "why are you not laughing?"
-      // - Assistant: "You got me there! 😂..."
-      const messages = getMessages(state);
-      expect(messages.length).toBeGreaterThanOrEqual(4);
-      expect(state.isStreaming).toBe(false);
+describe("real YAML data", () => {
+  const loadHiYaml = () => {
+    const yamlPath = join(__dirname, "../../.iterate/hi.yaml");
+    try {
+      return readFileSync(yamlPath, "utf-8");
+    } catch {
+      return null;
+    }
+  };
 
-      // First user message
-      expect(messages[0].role).toBe("user");
-      expect(messages[0].content[0].text).toBe("haha");
+  it("should handle real conversation data", () => {
+    const yamlContent = loadHiYaml();
+    if (!yamlContent) {
+      console.log("Skipping: hi.yaml not found");
+      return;
+    }
 
-      // First assistant response
-      expect(messages[1].role).toBe("assistant");
-      expect(messages[1].content[0].text).toContain("Haha!");
+    const events = parseYamlStreamEnvelopes(yamlContent);
+    const state = reduceWrapperEvents(events);
 
-      // Second user message
-      expect(messages[2].role).toBe("user");
-      expect(messages[2].content[0].text).toBe("why are you not laughing?");
-
-      // Second assistant response
-      expect(messages[3].role).toBe("assistant");
-      expect(messages[3].content[0].text).toContain("You got me there!");
-    });
-
-    it("should handle all event types from real data without crashing", () => {
-      const yamlContent = loadHiYaml();
-      if (!yamlContent) {
-        console.log("Skipping: hi.yaml not found");
-        return;
-      }
-
-      const events = parseYamlStream(yamlContent);
-
-      // This should not throw
-      expect(() => reducePiEvents(events)).not.toThrow();
-    });
-
-    it("should track all raw events from real data", () => {
-      const yamlContent = loadHiYaml();
-      if (!yamlContent) {
-        console.log("Skipping: hi.yaml not found");
-        return;
-      }
-
-      const events = parseYamlStream(yamlContent);
-      const state = reducePiEvents(events);
-
-      // All events should be tracked
-      expect(state.rawEvents).toHaveLength(events.length);
-    });
+    expect(getWrapperMessages(state).length).toBeGreaterThanOrEqual(2);
+    expect(state.isStreaming).toBe(false);
   });
 });

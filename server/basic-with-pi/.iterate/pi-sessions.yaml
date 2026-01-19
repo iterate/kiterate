@@ -1,4 +1,1 @@
-sessions:
-  - agentPath: /pi/asdasdasdasd2
-    sessionFile: /Users/jonastemplestein/.pi/agent/sessions/--Users-jonastemplestein-conductor-workspaces-kiterate-vancouver--/2026-01-19T22-26-55-451Z_c241bae1-2f16-4867-aed4-4bac2b9fc04a.jsonl
-    createdAt: 2026-01-19T22:26:55.456Z
+sessions: []

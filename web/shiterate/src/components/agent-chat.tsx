@@ -3,9 +3,9 @@ import { MessageSquareIcon, CodeIcon, MessageCircleIcon, AlertCircleIcon } from 
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
-  piReducer,
-  createInitialPiState,
-  type PiState,
+  wrapperReducer,
+  createInitialWrapperState,
+  type WrapperState,
   type FeedItem,
   type EventFeedItem,
   type GroupedEventFeedItem,
@@ -48,109 +48,43 @@ export interface AgentChatProps {
   onConnectionStatusChange?: (status: ConnectionStatus) => void;
 }
 
-/** Generate a stable key for feed items */
-function getFeedItemKey(item: FeedItem, index: number): string {
+/** Generate a stable key for feed items - no index to avoid key shifts */
+function getFeedItemKey(item: FeedItem): string {
   switch (item.kind) {
     case "message":
-      return `msg-${item.role}-${item.timestamp}-${index}`;
+      return `msg-${item.role}-${item.timestamp}`;
     case "error":
-      return `err-${item.timestamp}-${index}`;
+      return `err-${item.timestamp}`;
     case "event":
-      return `evt-${item.eventType}-${item.timestamp}-${index}`;
+      return `evt-${item.eventType}-${item.timestamp}`;
     case "grouped-event":
-      return `grp-${item.eventType}-${item.firstTimestamp}-${index}`;
+      return `grp-${item.eventType}-${item.firstTimestamp}-${item.lastTimestamp}`;
     case "tool":
       return `tool-${item.toolCallId}-${item.startTimestamp}`;
-    case "reasoning":
-      return `reasoning-${item.startTimestamp}-${index}`;
-    case "compaction":
-      return `compaction-${item.startTimestamp}-${index}`;
-    case "retry":
-      return `retry-${item.attempt}-${item.startTimestamp}`;
     default:
-      return `unknown-${index}`;
+      return `unknown-${Date.now()}`;
   }
-}
-
-/** Extract timestamp from an event object */
-function getEventTimestamp(e: Record<string, unknown>): number {
-  if (typeof e.createdAt === "string") {
-    const parsed = Date.parse(e.createdAt);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  if (typeof e.timestamp === "number") return e.timestamp;
-  if (typeof e.timestamp === "string") {
-    const parsed = Date.parse(e.timestamp);
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-  return Date.now();
-}
-
-/** Get event type from raw event - uses only top-level type for grouping */
-function getEventTypeKey(event: unknown): string {
-  if (typeof event !== "object" || event === null) return "unknown";
-  const record = event as Record<string, unknown>;
-  return typeof record.type === "string" ? record.type : "unknown";
-}
-
-/** Get timestamp from a feed item */
-function getItemTimestamp(item: FeedItem): number {
-  switch (item.kind) {
-    case "message":
-    case "error":
-    case "event":
-      return item.timestamp;
-    case "tool":
-    case "reasoning":
-    case "compaction":
-    case "retry":
-      return item.startTimestamp;
-    case "grouped-event":
-      return item.firstTimestamp;
-    default:
-      return Date.now();
-  }
-}
-
-/** Convert raw event to feed item format */
-function toRawEventItem(event: unknown): EventFeedItem {
-  if (typeof event !== "object" || event === null) {
-    return { kind: "event", eventType: "unknown", timestamp: Date.now(), raw: event };
-  }
-  const record = event as Record<string, unknown>;
-  return {
-    kind: "event",
-    eventType: typeof record.type === "string" ? record.type : "unknown",
-    timestamp: getEventTimestamp(record),
-    raw: event,
-  };
 }
 
 /**
  * Build display feed based on display mode.
  * - "pretty": Only non-event items (messages, tools, reasoning, etc.)
- * - "raw": Only raw events as EventFeedItems  
  * - "raw-pretty": Interleaved, with consecutive same-type events grouped
- * - "raw-raw": Returns null - handled separately as a single YAML dump
+ * - "raw": Returns null - handled separately as a single YAML dump
  */
 function buildDisplayFeed(
   feed: FeedItem[],
-  rawEvents: unknown[],
+  _rawEvents: unknown[],
   displayMode: DisplayMode
 ): FeedItem[] | null {
-  // "raw-raw" mode is handled separately - just return null to signal this
-  if (displayMode === "raw-raw") {
+  // "raw" mode is handled separately - just return null to signal this
+  if (displayMode === "raw") {
     return null;
   }
 
   if (displayMode === "pretty") {
     // Only show "pretty" items - filter out event items
     return feed.filter((item) => item.kind !== "event");
-  }
-
-  if (displayMode === "raw") {
-    // Only raw events - convert all rawEvents to EventFeedItems
-    return rawEvents.map(toRawEventItem);
   }
 
   // "raw-pretty" mode: Show everything, group consecutive events of same type
@@ -224,11 +158,11 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     state: { feed, isStreaming: stateIsStreaming, streamingMessage, rawEvents },
     isStreaming: hookIsStreaming,
     connectionStatus,
-  } = useDurableStream<PiState, { type: string; [key: string]: unknown }>({
+  } = useDurableStream<WrapperState, { type: string; [key: string]: unknown }>({
     url: buildAgentURL(apiURL, agentPath),
     storageKey: `agent:${agentPath}`,
-    reducer: piReducer,
-    initialState: createInitialPiState(),
+    reducer: wrapperReducer,
+    initialState: createInitialWrapperState(),
     suspense: false,
   });
 
@@ -251,9 +185,9 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     [selectedRawEventIndex, rawEvents]
   );
 
-  // In raw-raw mode, we render a single YAML dump instead of feed items
-  const isRawRawMode = displayMode === "raw-raw";
-  const isEmpty = !isRawRawMode && (displayFeed?.length === 0) && !streamingMessage;
+  // In raw mode, we render a single YAML dump instead of feed items
+  const isRawMode = displayMode === "raw";
+  const isEmpty = !isRawMode && (displayFeed?.length === 0) && !streamingMessage;
 
   // Sync raw events count to context
   useEffect(() => {
@@ -321,9 +255,9 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Conversation className="flex-1 min-h-0">
-        <ConversationContent className={isRawRawMode ? "p-2" : "p-6"}>
-          {isRawRawMode ? (
+      <Conversation className="flex-1 min-h-0" resize={isStreaming ? "instant" : "smooth"}>
+        <ConversationContent className={isRawMode ? "p-2" : "p-6"}>
+          {isRawMode ? (
             // Raw Raw mode: render all events as a single YAML dump
             rawEvents.length === 0 ? (
               <ConversationEmptyState
@@ -346,8 +280,8 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             />
           ) : (
             <>
-              {displayFeed?.map((item, index) => (
-                <FeedItemRenderer key={getFeedItemKey(item, index)} item={item} />
+              {displayFeed?.map((item) => (
+                <FeedItemRenderer key={getFeedItemKey(item)} item={item} />
               ))}
               {streamingMessage && (
                 <FeedItemRenderer key="streaming" item={streamingMessage} isStreaming />

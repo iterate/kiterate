@@ -104,12 +104,6 @@ export function AppHeader({ agentId, connectionStatus }: AppHeaderProps) {
             <SelectItem value="raw" className="py-2">
               <div className="flex flex-col">
                 <span className="text-sm font-medium">Raw</span>
-                <span className="text-xs text-muted-foreground">Individual raw events only</span>
-              </div>
-            </SelectItem>
-            <SelectItem value="raw-raw" className="py-2">
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">Raw Raw</span>
                 <span className="text-xs text-muted-foreground">All events as YAML dump</span>
               </div>
             </SelectItem>
