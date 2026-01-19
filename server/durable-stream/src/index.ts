@@ -10,7 +10,7 @@ export class NonDurableStream extends Context.Tag("@app/NonDurableStream")<
   {
     // TODO: Needs to retun the Event
     readonly append: (event: Event) => Effect.Effect<void>;
-    readonly stream: () => Stream.Stream<Event>;
+    readonly subscribe: () => Stream.Stream<Event>;
   }
 >() {}
 
@@ -22,7 +22,7 @@ export const InMemoryNonDurableStream: Layer.Layer<NonDurableStream> =
 
       return {
         append: (event) => PubSub.publish(pubsub, event).pipe(Effect.asVoid),
-        stream: () =>
+        subscribe: () =>
           Stream.unwrapScoped(
             Effect.map(PubSub.subscribe(pubsub), (queue) =>
               Stream.fromQueue(queue),
@@ -42,7 +42,7 @@ if (import.meta.vitest) {
         const stream = yield* NonDurableStream;
 
         const subscriber = yield* stream
-          .stream()
+          .subscribe()
           .pipe(Stream.take(1), Stream.runCollect, Effect.fork);
 
         yield* Effect.sleep("1 millis");
@@ -63,13 +63,13 @@ if (import.meta.vitest) {
         const stream = yield* NonDurableStream;
 
         const subscriber1 = yield* stream
-          .stream()
+          .subscribe()
           .pipe(Stream.take(1), Stream.runCollect, Effect.fork);
         const subscriber2 = yield* stream
-          .stream()
+          .subscribe()
           .pipe(Stream.take(1), Stream.runCollect, Effect.fork);
         const subscriber3 = yield* stream
-          .stream()
+          .subscribe()
           .pipe(Stream.take(1), Stream.runCollect, Effect.fork);
 
         yield* Effect.sleep("1 millis");
@@ -101,13 +101,14 @@ if (import.meta.vitest) {
         yield* Effect.sleep("1 millis");
 
         // Subscribe AFTER the event was appended
-        const events = yield* stream.stream().pipe(
-          Stream.takeUntil(() => true), // take nothing, just check
-          Stream.timeout("50 millis"),
+        const events = yield* stream.subscribe().pipe(
+          Stream.take(1),
           Stream.runCollect,
-          Effect.catchTag("TimeoutException", () =>
-            Effect.succeed(Chunk.empty<Event>()),
-          ),
+          Effect.timeoutTo({
+            duration: "50 millis",
+            onSuccess: (chunk) => chunk,
+            onTimeout: () => Chunk.empty<Event>(),
+          }),
         );
 
         expect(Chunk.toReadonlyArray(events)).toEqual([]);
@@ -122,10 +123,10 @@ if (import.meta.vitest) {
         const streamB = yield* NonDurableStream;
 
         const subscriberA = yield* streamA
-          .stream()
+          .subscribe()
           .pipe(Stream.take(1), Stream.runCollect, Effect.fork);
         const subscriberB = yield* streamB
-          .stream()
+          .subscribe()
           .pipe(Stream.take(1), Stream.runCollect, Effect.fork);
 
         yield* Effect.sleep("1 millis");
