@@ -5,7 +5,7 @@
   "scripts": {
     "dev:server": "pnpm --filter @kiterate/server-shiterate dev",
     "dev:web": "pnpm --filter @iterate-com/daemon dev",
-    "dev": "node dev.mjs",
+    "dev": "doppler run -- node dev.mjs",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --fix",
     "lint:check": "eslint . --max-warnings 0",

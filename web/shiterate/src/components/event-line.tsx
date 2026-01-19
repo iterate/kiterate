@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RefreshCwIcon, ArchiveIcon } from "lucide-react";
 import { HarnessErrorAlert } from "./harness-error-alert.tsx";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -11,6 +12,7 @@ import type {
   ReasoningFeedItem,
   CompactionFeedItem,
   RetryFeedItem,
+  GroupedEventFeedItem,
 } from "@/reducers/messages-reducer.ts";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message.tsx";
 import { Shimmer } from "@/components/ai-elements/shimmer.tsx";
@@ -27,7 +29,6 @@ import {
   ReasoningContent,
 } from "@/components/ai-elements/reasoning.tsx";
 import { Badge } from "@/components/ui/badge.tsx";
-import { RefreshCwIcon, ArchiveIcon } from "lucide-react";
 
 function getMessageText(content: { type: string; text: string }[]): string {
   return content
@@ -65,10 +66,6 @@ export function EventLine({ event }: { event: EventFeedItem }) {
   const [open, setOpen] = useState(false);
   const timeStr = new Date(event.timestamp).toLocaleTimeString();
 
-  const raw = event.raw as Record<string, unknown> | null;
-  const payload = raw?.payload as { piEventType?: string } | undefined;
-  const piEventType = payload?.piEventType;
-
   return (
     <div className="flex justify-end">
       <Button
@@ -77,10 +74,7 @@ export function EventLine({ event }: { event: EventFeedItem }) {
         className="h-auto py-0.5 px-2 text-xs text-muted-foreground hover:text-foreground gap-2"
         onClick={() => setOpen(true)}
       >
-        <span className="font-mono">
-          {event.eventType}
-          {piEventType && <span className="text-foreground/60"> → {piEventType}</span>}
-        </span>
+        <span className="font-mono">{event.eventType}</span>
         <span>·</span>
         <span>{timeStr}</span>
       </Button>
@@ -90,13 +84,62 @@ export function EventLine({ event }: { event: EventFeedItem }) {
           <DialogHeader>
             <DialogTitle className="font-mono text-sm">
               {event.eventType}
-              {piEventType && <span className="text-muted-foreground"> → {piEventType}</span>}
               <span className="text-muted-foreground ml-2">· {timeStr}</span>
             </DialogTitle>
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden">
             <SerializedObjectCodeBlock
               data={event.raw}
+              className="h-full"
+              initialFormat="yaml"
+              showToggle
+              showCopyButton
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/** Render a group of consecutive events of the same type */
+export function GroupedEventLine({ group }: { group: GroupedEventFeedItem }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const firstTimeStr = new Date(group.firstTimestamp).toLocaleTimeString();
+  const lastTimeStr = new Date(group.lastTimestamp).toLocaleTimeString();
+
+  return (
+    <div className="flex justify-end">
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-auto py-0.5 px-2 text-xs text-muted-foreground hover:text-foreground gap-2"
+        onClick={() => setDialogOpen(true)}
+      >
+        <span className="font-mono">{group.eventType}</span>
+        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          ×{group.count}
+        </Badge>
+        <span>·</span>
+        <span>{firstTimeStr}</span>
+        {firstTimeStr !== lastTimeStr && (
+          <span className="text-muted-foreground/60">– {lastTimeStr}</span>
+        )}
+      </Button>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="w-[100vw] max-w-[100vw] h-[100vh] max-h-[100vh] sm:w-[80vw] sm:max-w-[80vw] sm:h-[80vh] sm:max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="font-mono text-sm">
+              {group.eventType}
+              <Badge variant="secondary" className="ml-2 text-xs">
+                {group.count} events
+              </Badge>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <SerializedObjectCodeBlock
+              data={group.events.map(e => e.raw)}
               className="h-full"
               initialFormat="yaml"
               showToggle
@@ -223,6 +266,8 @@ export function FeedItemRenderer({ item, isStreaming }: { item: FeedItem; isStre
       return <HarnessErrorAlert error={item} />;
     case "event":
       return <EventLine event={item} />;
+    case "grouped-event":
+      return <GroupedEventLine group={item} />;
     case "tool":
       return <ToolExecution tool={item} />;
     case "reasoning":

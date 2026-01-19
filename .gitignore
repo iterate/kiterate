@@ -1,1 +1,4 @@
 node_modules
+
+# Durable streams data
+server/shiterate/.iterate/

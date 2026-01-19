@@ -1,45 +1,11 @@
 /**
- * Persistent Stream Reducer for Durable Streams
+ * Stream Reducer for Durable Streams
  *
- * A React hook that consumes a durable-streams SSE endpoint, persists events
- * to localStorage, and resumes from the last known offset on page reload.
+ * A React hook that consumes a durable-streams SSE endpoint.
+ * Always starts fresh from offset "-1" (no localStorage persistence).
  *
  * Compatible with any server implementing the durable-streams protocol:
  * https://github.com/durable-streams/durable-streams
- *
- * ## Suspense Integration
- *
- * This hook integrates with React Suspense. It throws a promise during:
- * - Initial replay of persisted events from localStorage
- * - Catch-up phase while waiting for server's `up-to-date` signal
- *
- * Once ready, the component renders with full state. Wrap usage in <Suspense>:
- *
- * ```tsx
- * <Suspense fallback={<Spinner />}>
- *   <Chat agentId="123" />
- * </Suspense>
- * ```
- *
- * ## Batched Replay
- *
- * Replaying thousands of events synchronously would block the main thread.
- * This hook processes persisted events in batches, yielding to the browser
- * between batches via `scheduler.yield()` (with `setTimeout` fallback).
- * Configure batch size with `replayBatchSize` (default: 100).
- *
- * ## Key Concepts
- *
- * 1. OFFSET-BASED RESUMPTION
- *    Durable streams use opaque offset strings. Store the last offset and
- *    pass it on reconnection to resume exactly where you left off.
- *
- * 2. EVENT FILTERING
- *    Some events (streaming chunks) are useful live but wasteful to persist.
- *    `shouldPersist` controls what gets stored without affecting live updates.
- *
- * 3. SINGLE-TAB CONNECTION
- *    Each tab opens its own SSE connection and persists events locally.
  */
 
 import { useReducer, useEffect, useRef, useState, useCallback } from "react";
@@ -63,19 +29,17 @@ export interface PersistentStreamConfig<TState, TEvent extends StreamEvent> {
   /** Initial state before any events */
   initialState: TState;
 
-  /** Storage key prefix for localStorage */
+  /** Storage key prefix (kept for API compatibility, not used) */
   storageKey: string;
 
   /**
-   * Filter for persistence. Return true to store, false to skip.
-   * All events still go through the reducer for live updates.
+   * Filter for persistence (kept for API compatibility, not used).
    * @default () => true
    */
   shouldPersist?: (event: TEvent) => boolean;
 
   /**
-   * Events to process per batch during replay.
-   * Lower = more responsive UI, higher = faster total replay.
+   * Events to process per batch (kept for API compatibility, not used).
    * @default 100
    */
   replayBatchSize?: number;
@@ -94,6 +58,12 @@ export interface PersistentStreamConfig<TState, TEvent extends StreamEvent> {
   suspense?: boolean;
 }
 
+export type ConnectionStatus =
+  | { state: "connecting" }
+  | { state: "connected" }
+  | { state: "error"; message: string }
+  | { state: "closed" };
+
 export interface PersistentStreamResult<TState> {
   /** Current reduced state */
   state: TState;
@@ -101,11 +71,14 @@ export interface PersistentStreamResult<TState> {
   /** True while receiving streaming events (e.g., LLM tokens) */
   isStreaming: boolean;
 
-  /** Clear persisted data and reset */
+  /** Clear state and reload (just reloads now) */
   reset: () => void;
 
   /** Current offset (for debugging) */
   offset: string;
+
+  /** SSE connection status */
+  connectionStatus: ConnectionStatus;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -143,132 +116,6 @@ function createSuspenseResource(_key: string, promise: Promise<void>): SuspenseR
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Storage
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MAX_STORED_EVENTS = 1000;
-const TRIM_TO_EVENTS = 500;
-
-const storage = {
-  getEvents<E>(key: string): E[] {
-    try {
-      const raw = localStorage.getItem(`${key}:events`);
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  },
-
-  getOffset(key: string): string {
-    try {
-      return localStorage.getItem(`${key}:offset`) ?? "-1";
-    } catch {
-      return "-1";
-    }
-  },
-
-  appendEvent<E>(key: string, event: E): void {
-    try {
-      let events = this.getEvents<E>(key);
-      events.push(event);
-
-      if (events.length > MAX_STORED_EVENTS) {
-        events = events.slice(-TRIM_TO_EVENTS);
-      }
-
-      localStorage.setItem(`${key}:events`, JSON.stringify(events));
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "QuotaExceededError") {
-        try {
-          const events = this.getEvents<E>(key);
-          const trimmed = events.slice(-TRIM_TO_EVENTS);
-          trimmed.push(event);
-          localStorage.setItem(`${key}:events`, JSON.stringify(trimmed));
-        } catch {
-          this.clear(key);
-        }
-      }
-    }
-  },
-
-  setOffset(key: string, offset: string): void {
-    try {
-      localStorage.setItem(`${key}:offset`, offset);
-    } catch {
-      // Ignore quota errors for offset - it's small and we'll recover on reconnect
-    }
-  },
-
-  clear(key: string): void {
-    try {
-      localStorage.removeItem(`${key}:events`);
-      localStorage.removeItem(`${key}:offset`);
-    } catch {
-      // Ignore errors during cleanup
-    }
-  },
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Batched replay
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function yieldToMain(): Promise<void> {
-  if (
-    "scheduler" in globalThis &&
-    "yield" in (globalThis as unknown as { scheduler?: { yield?: unknown } }).scheduler!
-  ) {
-    return (
-      globalThis as unknown as { scheduler: { yield: () => Promise<void> } }
-    ).scheduler.yield();
-  }
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function replayEventsInBatches<TState, TEvent>(
-  events: TEvent[],
-  reducer: (state: TState, event: TEvent) => TState,
-  initialState: TState,
-  batchSize: number,
-): Promise<TState> {
-  let state = initialState;
-
-  for (let i = 0; i < events.length; i += batchSize) {
-    const batch = events.slice(i, i + batchSize);
-    for (const event of batch) {
-      state = reducer(state, event);
-    }
-    if (i + batchSize < events.length) {
-      await yieldToMain();
-    }
-  }
-
-  return state;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Batch initialization action type
-// ─────────────────────────────────────────────────────────────────────────────
-
-const BATCH_INIT_TYPE = "__PERSISTENT_STREAM_BATCH_INIT__";
-
-interface BatchInitAction<TState> {
-  type: typeof BATCH_INIT_TYPE;
-  state: TState;
-}
-
-function wrapReducer<TState, TEvent extends StreamEvent>(
-  reducer: (state: TState, event: TEvent) => TState,
-) {
-  return (state: TState, action: TEvent | BatchInitAction<TState>): TState => {
-    if (action.type === BATCH_INIT_TYPE) {
-      return (action as BatchInitAction<TState>).state;
-    }
-    return reducer(state, action as TEvent);
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Hook
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -277,27 +124,23 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
   reducer,
   initialState,
   storageKey,
-  shouldPersist = () => true,
-  replayBatchSize = 100,
   onCaughtUp,
   onMustRefetch,
   suspense = true,
 }: PersistentStreamConfig<TState, TEvent>): PersistentStreamResult<TState> {
-  const wrappedReducer = wrapReducer(reducer);
-  const [state, dispatch] = useReducer(wrappedReducer, initialState);
-  const [phase, setPhase] = useState<"idle" | "replaying" | "catching-up" | "ready">("idle");
+  const [state, dispatch] = useReducer(reducer, initialState);
+  const [phase, setPhase] = useState<"idle" | "connecting" | "ready">("idle");
   const [isStreaming, setIsStreaming] = useState(false);
   const [offset, setOffset] = useState("-1");
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ state: "connecting" });
 
   // Refs for values that shouldn't trigger effect re-runs
   const offsetRef = useRef("-1");
-  const shouldPersistRef = useRef(shouldPersist);
   const onCaughtUpRef = useRef(onCaughtUp);
   const onMustRefetchRef = useRef(onMustRefetch);
   const readyResolverRef = useRef<(() => void) | null>(null);
 
   // Keep refs in sync without triggering effects
-  shouldPersistRef.current = shouldPersist;
   onCaughtUpRef.current = onCaughtUp;
   onMustRefetchRef.current = onMustRefetch;
 
@@ -311,133 +154,140 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
     suspenseCache.set(suspenseKey, createSuspenseResource(suspenseKey, readyPromise));
   }
 
-  // Single effect for replay + SSE - only re-runs when url/storageKey changes
+  // SSE connection effect
   useEffect(() => {
     if (!url) {
       setPhase("ready");
+      setConnectionStatus({ state: "closed" });
       return;
     }
 
     let cancelled = false;
     let eventSource: EventSource | null = null;
 
-    const startSSE = () => {
-      if (cancelled) return;
+    setPhase("connecting");
+    setConnectionStatus({ state: "connecting" });
+    offsetRef.current = "-1";
+    setOffset("-1");
 
-      const streamUrl = new URL(url, window.location.origin);
-      streamUrl.searchParams.set("offset", offsetRef.current);
-      streamUrl.searchParams.set("live", "sse");
+    const streamUrl = new URL(url, window.location.origin);
+    streamUrl.searchParams.set("offset", "-1");
+    streamUrl.searchParams.set("live", "sse");
 
-      eventSource = new EventSource(streamUrl.toString());
+    eventSource = new EventSource(streamUrl.toString());
 
-      const handleEvent = (evt: MessageEvent, isControlEvent = false) => {
-        if (cancelled) return;
-        try {
-          const data = JSON.parse(evt.data);
-
-          const newOffset = evt.lastEventId || data.headers?.offset;
-          if (newOffset) {
-            offsetRef.current = newOffset;
-            storage.setOffset(storageKey, newOffset);
-            setOffset(newOffset);
-          }
-
-          if (isControlEvent || data.headers?.control) {
-            const controlType = isControlEvent
-              ? data.upToDate
-                ? "up-to-date"
-                : data.streamNextOffset
-                  ? "offset-update"
-                  : null
-              : data.headers.control;
-
-            switch (controlType) {
-              case "up-to-date":
-                // Save the offset from the control event
-                if (data.streamNextOffset) {
-                  offsetRef.current = data.streamNextOffset;
-                  storage.setOffset(storageKey, data.streamNextOffset);
-                  setOffset(data.streamNextOffset);
-                }
-                setPhase("ready");
-                readyResolverRef.current?.();
-                onCaughtUpRef.current?.();
-                break;
-              case "must-refetch":
-                storage.clear(storageKey);
-                suspenseCache.delete(suspenseKey);
-                onMustRefetchRef.current?.();
-                break;
-              case "offset-update":
-                if (data.streamNextOffset) {
-                  offsetRef.current = data.streamNextOffset;
-                  storage.setOffset(storageKey, data.streamNextOffset);
-                  setOffset(data.streamNextOffset);
-                }
-                break;
-            }
-            if (isControlEvent) return;
-            if (data.headers?.control) return;
-          }
-
-          const events: TEvent[] = Array.isArray(data) ? data : [data];
-
-          for (const event of events) {
-            if (!event.type) continue;
-
-            dispatch(event);
-
-            if (shouldPersistRef.current(event)) {
-              storage.appendEvent(storageKey, event);
-            }
-
-            if (event.type === "message_start") {
-              setIsStreaming(true);
-            } else if (
-              event.type === "message_complete" ||
-              event.type === "message_end" ||
-              event.type === "agent_end"
-            ) {
-              setIsStreaming(false);
-            }
-          }
-        } catch (e) {
-          console.error("[durable-stream] Parse error:", e);
-        }
-      };
-
-      eventSource.onmessage = (evt) => handleEvent(evt);
-      eventSource.addEventListener("control", (evt) => handleEvent(evt as MessageEvent, true));
-      eventSource.addEventListener("data", (evt) => handleEvent(evt as MessageEvent));
+    eventSource.onopen = () => {
+      if (!cancelled) {
+        setConnectionStatus({ state: "connected" });
+      }
     };
 
-    // Start replay
-    setPhase("replaying");
+    const handleEvent = (evt: MessageEvent, isControlEvent = false) => {
+      if (cancelled) return;
+      try {
+        const data = JSON.parse(evt.data);
 
-    const events = storage.getEvents<TEvent>(storageKey);
-    offsetRef.current = storage.getOffset(storageKey);
-    setOffset(offsetRef.current);
+        // Extract offset from event data
+        const dataOffset = Array.isArray(data) ? data[0]?.offset : data.offset;
+        const newOffset = evt.lastEventId || dataOffset || data.headers?.offset;
+        if (newOffset) {
+          offsetRef.current = newOffset;
+          setOffset(newOffset);
+        }
 
-    if (events.length === 0) {
-      setPhase("catching-up");
-      startSSE();
-    } else {
-      replayEventsInBatches(events, reducer, initialState, replayBatchSize).then(
-        (replayedState) => {
-          if (cancelled) return;
-          dispatch({ type: BATCH_INIT_TYPE, state: replayedState });
-          setPhase("catching-up");
-          startSSE();
-        },
-      );
-    }
+        if (isControlEvent || data.headers?.control) {
+          const controlType = isControlEvent
+            ? data.upToDate
+              ? "up-to-date"
+              : data.streamNextOffset
+                ? "offset-update"
+                : null
+            : data.headers.control;
+
+          switch (controlType) {
+            case "up-to-date":
+              if (data.streamNextOffset) {
+                offsetRef.current = data.streamNextOffset;
+                setOffset(data.streamNextOffset);
+              }
+              setPhase("ready");
+              readyResolverRef.current?.();
+              onCaughtUpRef.current?.();
+              break;
+            case "must-refetch":
+              suspenseCache.delete(suspenseKey);
+              onMustRefetchRef.current?.();
+              break;
+            case "offset-update":
+              if (data.streamNextOffset) {
+                offsetRef.current = data.streamNextOffset;
+                setOffset(data.streamNextOffset);
+              }
+              break;
+          }
+          if (isControlEvent) return;
+          if (data.headers?.control) return;
+        }
+
+        const events: TEvent[] = Array.isArray(data) ? data : [data];
+
+        for (const event of events) {
+          if (!event.type) continue;
+
+          dispatch(event);
+
+          // Check for streaming events
+          const payload =
+            event.type === "iterate:agent:harness:pi:event-received"
+              ? (event.payload as {
+                  piEventType?: string;
+                  piEvent?: { message?: { role?: string } };
+                } | undefined)
+              : null;
+          const piEventType = payload?.piEventType ?? event.type;
+          const messageRole = payload?.piEvent?.message?.role;
+
+          // Only set streaming for ASSISTANT messages
+          if (piEventType === "message_start" && messageRole === "assistant") {
+            setIsStreaming(true);
+          } else if (
+            piEventType === "message_complete" ||
+            piEventType === "message_end" ||
+            piEventType === "agent_end" ||
+            piEventType === "turn_end"
+          ) {
+            setIsStreaming(false);
+          }
+        }
+      } catch (e) {
+        console.error("[stream] Parse error:", e);
+      }
+    };
+
+    eventSource.addEventListener("control", (evt) => handleEvent(evt as MessageEvent, true));
+    eventSource.addEventListener("data", (evt) => handleEvent(evt as MessageEvent));
+
+    eventSource.onerror = (err) => {
+      console.error("[stream] SSE connection error:", err);
+      if (!cancelled) {
+        // EventSource errors don't provide detailed info, but we can check readyState
+        const es = eventSource;
+        if (es?.readyState === EventSource.CLOSED) {
+          setConnectionStatus({ state: "error", message: "Connection closed" });
+        } else if (es?.readyState === EventSource.CONNECTING) {
+          setConnectionStatus({ state: "connecting" });
+        } else {
+          setConnectionStatus({ state: "error", message: "Connection error" });
+        }
+      }
+    };
 
     return () => {
       cancelled = true;
       eventSource?.close();
+      setConnectionStatus({ state: "closed" });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally minimal deps to avoid infinite loops. reducer/initialState/replayBatchSize are stable.
-  }, [url, storageKey]);
+  }, [url, storageKey, suspenseKey]);
 
   // Throw for Suspense if enabled and not ready
   if (suspense && url && phase !== "ready" && phase !== "idle") {
@@ -445,16 +295,15 @@ export function usePersistentStream<TState, TEvent extends StreamEvent>({
   }
 
   const reset = useCallback(() => {
-    storage.clear(storageKey);
     suspenseCache.delete(suspenseKey);
     window.location.reload();
-  }, [storageKey, suspenseKey]);
+  }, [suspenseKey]);
 
-  return { state, isStreaming, reset, offset };
+  return { state, isStreaming, reset, offset, connectionStatus };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Filters
+// Filters (kept for API compatibility)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function excludeChunks(event: StreamEvent): boolean {

@@ -11,24 +11,6 @@ import {
 // Mocks
 // ─────────────────────────────────────────────────────────────────────────────
 
-const localStorageMock = (() => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: (key: string) => store[key] ?? null,
-    setItem: (key: string, value: string) => {
-      store[key] = value;
-    },
-    removeItem: (key: string) => {
-      delete store[key];
-    },
-    clear: () => {
-      store = {};
-    },
-  };
-})();
-
-Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
-
 class MockEventSource {
   static instances: MockEventSource[] = [];
 
@@ -124,7 +106,6 @@ const initialState: TestState = { items: [], pending: null };
 
 describe("usePersistentStream", () => {
   beforeEach(() => {
-    localStorageMock.clear();
     MockEventSource.reset();
     vi.clearAllMocks();
   });
@@ -214,7 +195,6 @@ describe("usePersistentStream", () => {
 
       expect(MockEventSource.instances.length).toBe(1);
     });
-
   });
 
   describe("event processing", () => {
@@ -232,7 +212,7 @@ describe("usePersistentStream", () => {
       await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
 
       act(() => {
-        MockEventSource.instances[0].emit({ type: "item_complete", content: "hello" });
+        MockEventSource.instances[0].emitNamed("data", { type: "item_complete", content: "hello" });
       });
 
       await waitFor(() => {
@@ -256,92 +236,8 @@ describe("usePersistentStream", () => {
     });
   });
 
-  describe("persistence", () => {
-    it("persists events to localStorage", async () => {
-      renderHook(() =>
-        usePersistentStream({
-          url: "/test",
-          storageKey: "test-2",
-          reducer: testReducer,
-          initialState,
-          suspense: false,
-        }),
-      );
-
-      await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
-
-      act(() => {
-        MockEventSource.instances[0].emit({ type: "item_complete", content: "saved" });
-      });
-
-      await waitFor(() => {
-        const stored = JSON.parse(localStorage.getItem("test-2:events") ?? "[]");
-        expect(stored).toContainEqual({ type: "item_complete", content: "saved" });
-      });
-    });
-
-    it("respects shouldPersist filter", async () => {
-      renderHook(() =>
-        usePersistentStream({
-          url: "/test",
-          storageKey: "test-3",
-          reducer: testReducer,
-          initialState,
-          shouldPersist: (e) => e.type !== "item_chunk",
-          suspense: false,
-        }),
-      );
-
-      await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
-
-      const es = MockEventSource.instances[0];
-
-      act(() => {
-        es.emit({ type: "item_start", id: "1" });
-        es.emit({ type: "item_chunk", content: "a" });
-        es.emit({ type: "item_chunk", content: "b" });
-        es.emit({ type: "item_complete", content: "ab" });
-      });
-
-      await waitFor(() => {
-        const stored = JSON.parse(localStorage.getItem("test-3:events") ?? "[]");
-        const types = stored.map((e: TestEvent) => e.type);
-        expect(types).toEqual(["item_start", "item_complete"]);
-        expect(types).not.toContain("item_chunk");
-      });
-    });
-
-    it("replays persisted events on mount", async () => {
-      localStorage.setItem(
-        "test-4:events",
-        JSON.stringify([
-          { type: "item_complete", content: "first" },
-          { type: "item_complete", content: "second" },
-        ]),
-      );
-
-      const { result } = renderHook(() =>
-        usePersistentStream({
-          url: "/test",
-          storageKey: "test-4",
-          reducer: testReducer,
-          initialState,
-          suspense: false,
-        }),
-      );
-
-      await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
-
-      await waitFor(() => {
-        expect(result.current.state.items).toEqual(["first", "second"]);
-      });
-    });
-  });
-
   describe("offset tracking", () => {
-    it("resumes from stored offset", async () => {
-      localStorage.setItem("test-5:offset", "saved-offset-123");
-
+    it("always starts from offset -1", async () => {
       renderHook(() =>
         usePersistentStream({
           url: "/test",
@@ -355,11 +251,11 @@ describe("usePersistentStream", () => {
       await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
 
       const url = new URL(MockEventSource.instances[0].url, "http://localhost");
-      expect(url.searchParams.get("offset")).toBe("saved-offset-123");
+      expect(url.searchParams.get("offset")).toBe("-1");
     });
 
-    it("saves offset from SSE lastEventId", async () => {
-      renderHook(() =>
+    it("updates offset from SSE lastEventId", async () => {
+      const { result } = renderHook(() =>
         usePersistentStream({
           url: "/test",
           storageKey: "test-6",
@@ -372,20 +268,21 @@ describe("usePersistentStream", () => {
       await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
 
       act(() => {
-        MockEventSource.instances[0].emit(
+        MockEventSource.instances[0].emitNamed(
+          "data",
           { type: "item_complete", content: "test" },
           "new-offset-456",
         );
       });
 
       await waitFor(() => {
-        expect(localStorage.getItem("test-6:offset")).toBe("new-offset-456");
+        expect(result.current.offset).toBe("new-offset-456");
       });
     });
   });
 
   describe("streaming state", () => {
-    it("tracks streaming from message_start/complete events", async () => {
+    it("tracks streaming from Pi assistant message_start/complete events", async () => {
       const { result } = renderHook(() =>
         usePersistentStream({
           url: "/test",
@@ -400,17 +297,69 @@ describe("usePersistentStream", () => {
 
       expect(result.current.isStreaming).toBe(false);
 
+      // Use Pi-wrapped event format with role: assistant
       act(() => {
-        MockEventSource.instances[0].emit({ type: "message_start", id: "1" });
+        MockEventSource.instances[0].emitNamed("data", {
+          type: "iterate:agent:harness:pi:event-received",
+          payload: {
+            piEventType: "message_start",
+            piEvent: {
+              type: "message_start",
+              message: { role: "assistant", content: [] },
+            },
+          },
+        });
       });
 
       await waitFor(() => expect(result.current.isStreaming).toBe(true));
 
       act(() => {
-        MockEventSource.instances[0].emit({ type: "message_complete", id: "1" });
+        MockEventSource.instances[0].emitNamed("data", {
+          type: "iterate:agent:harness:pi:event-received",
+          payload: {
+            piEventType: "message_complete",
+            piEvent: { type: "message_complete" },
+          },
+        });
       });
 
       await waitFor(() => expect(result.current.isStreaming).toBe(false));
+    });
+
+    it("does NOT set streaming for user message_start events", async () => {
+      const { result } = renderHook(() =>
+        usePersistentStream({
+          url: "/test",
+          storageKey: "test-8",
+          reducer: testReducer,
+          initialState,
+          suspense: false,
+        }),
+      );
+
+      await waitFor(() => expect(MockEventSource.instances.length).toBe(1));
+
+      expect(result.current.isStreaming).toBe(false);
+
+      // User message_start should NOT trigger streaming
+      act(() => {
+        MockEventSource.instances[0].emitNamed("data", {
+          type: "iterate:agent:harness:pi:event-received",
+          payload: {
+            piEventType: "message_start",
+            piEvent: {
+              type: "message_start",
+              message: { role: "user", content: [] },
+            },
+          },
+        });
+      });
+
+      // Give it a moment to process
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should still be false since it was a user message
+      expect(result.current.isStreaming).toBe(false);
     });
   });
 });

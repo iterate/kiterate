@@ -1,30 +1,100 @@
-import { Switch } from "@/components/ui/switch.tsx";
-import { Label } from "@/components/ui/label.tsx";
-import { useRawMode } from "@/hooks/use-raw-mode.ts";
+import { useRawMode, type DisplayMode } from "@/hooks/use-raw-mode.ts";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.tsx";
+import type { ConnectionStatus } from "@/reducers/persistent-stream-reducer";
 
 interface AppHeaderProps {
   agentId?: string;
+  connectionStatus?: ConnectionStatus | null;
 }
 
-export function AppHeader({ agentId }: AppHeaderProps) {
-  const { rawMode, setRawMode, rawEventsCount } = useRawMode();
+const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
+  "pretty": "Pretty",
+  "raw-pretty": "Raw + Pretty",
+  "raw": "Raw",
+  "raw-raw": "Raw Raw",
+};
+
+/** Connection status indicator with pulsing dot */
+function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
+  const isConnected = status.state === "connected";
+  const isError = status.state === "error";
+  const isConnecting = status.state === "connecting";
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={`size-2 rounded-full ${
+          isConnected
+            ? "bg-green-500 animate-pulse"
+            : isError
+              ? "bg-red-500"
+              : isConnecting
+                ? "bg-yellow-500 animate-pulse"
+                : "bg-gray-400"
+        }`}
+      />
+      {isError && (
+        <span className="text-xs text-destructive">{status.message}</span>
+      )}
+    </div>
+  );
+}
+
+export function AppHeader({ agentId, connectionStatus }: AppHeaderProps) {
+  const { displayMode, setDisplayMode, rawEventsCount } = useRawMode();
 
   if (!agentId) {
     return null;
   }
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
-      <div className="font-medium truncate max-w-[200px] sm:max-w-[300px]">{agentId}</div>
+    <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4 border-b">
       <div className="flex items-center gap-2">
-        <Switch id="raw-mode" checked={rawMode} onCheckedChange={setRawMode} />
-        <Label htmlFor="raw-mode" className="text-sm text-muted-foreground cursor-pointer">
-          Raw
-          {rawEventsCount > 0 && (
-            <span className="ml-1 text-muted-foreground/60">({rawEventsCount})</span>
-          )}
-        </Label>
+        <span className="font-medium truncate max-w-[200px] sm:max-w-[300px]">{agentId}</span>
+        {connectionStatus && <ConnectionIndicator status={connectionStatus} />}
       </div>
+      <Select value={displayMode} onValueChange={(value) => setDisplayMode(value as DisplayMode)}>
+        <SelectTrigger className="h-8 w-auto min-w-[130px] text-xs">
+          <SelectValue>
+            {DISPLAY_MODE_LABELS[displayMode]}
+            {rawEventsCount > 0 && (
+              <span className="ml-1 text-muted-foreground">({rawEventsCount})</span>
+            )}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="pretty" className="py-2">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">Pretty</span>
+              <span className="text-xs text-muted-foreground">Hide raw events</span>
+            </div>
+          </SelectItem>
+          <SelectItem value="raw-pretty" className="py-2">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">Raw + Pretty</span>
+              <span className="text-xs text-muted-foreground">Grouped raw events + pretty</span>
+            </div>
+          </SelectItem>
+          <SelectItem value="raw" className="py-2">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">Raw</span>
+              <span className="text-xs text-muted-foreground">Individual raw events only</span>
+            </div>
+          </SelectItem>
+          <SelectItem value="raw-raw" className="py-2">
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">Raw Raw</span>
+              <span className="text-xs text-muted-foreground">All events as YAML dump</span>
+            </div>
+          </SelectItem>
+        </SelectContent>
+      </Select>
     </header>
   );
 }

@@ -247,3 +247,7 @@ While it may seem like I think we've worked it all out, it's actually quite the 
 - How do we handle image files? They often need to be uploaded to the LLM provider in some awkward way - might need a special abstaction for that
 
 - How much of our core code should be in events? What are the bull and bear cases for putting even our core logic into events as strings of code? What if "giving the agent the ability to use [new inference provider X]" is just adding events?
+
+- How do we do "single turn mode" in the CLI? Since there is no direct connection between append and events streaming back, it might be "append + wait for next idle"?
+
+- Do we use effect's _tag instead of `type` properties?! And general taxonomy and envelope format questions... EventStream or ContextStream etc. 

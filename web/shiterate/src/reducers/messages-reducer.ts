@@ -116,6 +116,19 @@ export interface RetryFeedItem {
   finalError?: string;
 }
 
+/**
+ * Grouped event feed item - multiple consecutive events of the same type.
+ * Used in "raw + pretty" mode to collapse repeated event types.
+ */
+export interface GroupedEventFeedItem {
+  kind: "grouped-event";
+  eventType: string;
+  count: number;
+  events: EventFeedItem[];
+  firstTimestamp: number;
+  lastTimestamp: number;
+}
+
 export type FeedItem =
   | MessageFeedItem
   | EventFeedItem
@@ -123,7 +136,8 @@ export type FeedItem =
   | ToolFeedItem
   | ReasoningFeedItem
   | CompactionFeedItem
-  | RetryFeedItem;
+  | RetryFeedItem
+  | GroupedEventFeedItem;
 
 /**
  * Active tool execution being tracked (before completion).
@@ -777,6 +791,17 @@ export function messagesReducer(state: MessagesState, event: unknown): MessagesS
           payload?.stack,
         ),
       ],
+      rawEvents,
+    };
+  }
+
+  // Handle user message events as action events only (not creating message items)
+  // The actual user message will be displayed when the PI SDK sends message_end for user role
+  // This avoids duplicate user messages in the feed
+  if (eventType === "iterate:agent:action:send-user-message:called") {
+    return {
+      ...state,
+      feed: [...state.feed, createEventItem(eventType, timestamp, event)],
       rawEvents,
     };
   }

@@ -1,67 +1,78 @@
-import { useState, useEffect } from "react";
-import { AgentChat } from "@/components/agent-chat.tsx";
-import { AppHeader } from "@/components/app-header.tsx";
+import { useMemo, useState, useCallback } from "react";
+import { AgentChat } from "@/components/agent-chat";
+import { AppHeader } from "@/components/app-header";
+import { useHashAgent } from "@/hooks/use-hash-agent";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import type { ConnectionStatus } from "@/reducers/persistent-stream-reducer";
 
 export function App() {
-  const apiURL = new URL("/", window.location.href).toString();
-  const [selectedStream, setSelectedStream] = useState<string>("");
-  const [hashStream, setHashStream] = useState<string>("");
-  const [agentPathInput, setAgentPathInput] = useState("");
+  const apiURL = useMemo(() => new URL("/", window.location.href).toString(), []);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
+  
+  const {
+    selectedStream,
+    agentPathInput,
+    piMode,
+    setAgentPathInput,
+    setPiMode,
+    selectAgent,
+  } = useHashAgent();
 
-  useEffect(() => {
-    const readHash = () => {
-      const hashValue = window.location.hash.replace(/^#/, "");
-      const decoded = hashValue ? decodeURIComponent(hashValue) : "";
-      setHashStream(decoded);
-    };
-    readHash();
-    window.addEventListener("hashchange", readHash);
-    return () => window.removeEventListener("hashchange", readHash);
+  const handleConnectionStatusChange = useCallback((status: ConnectionStatus) => {
+    setConnectionStatus(status);
   }, []);
-
-  useEffect(() => {
-    setSelectedStream(hashStream);
-    setAgentPathInput(hashStream);
-  }, [hashStream]);
-
-  const handleSelectAgent = () => {
-    const trimmed = agentPathInput.trim();
-    if (!trimmed) return;
-    const normalized = trimmed.replace(/^#/, "").replace(/^\/?agents\//, "");
-    if (!normalized) return;
-    window.location.hash = encodeURIComponent(normalized);
-  };
 
   return (
     <div className="flex h-screen bg-background text-foreground">
       <section className="flex min-w-0 flex-1 flex-col">
-        <AppHeader agentId={selectedStream || undefined} />
+        <AppHeader 
+          agentId={selectedStream || undefined} 
+          connectionStatus={connectionStatus}
+        />
         <div className="flex min-h-0 flex-1 flex-col">
           {selectedStream ? (
-            <AgentChat agentPath={selectedStream} apiURL={apiURL} />
+            <AgentChat 
+              key={selectedStream} 
+              agentPath={selectedStream} 
+              apiURL={apiURL}
+              onConnectionStatusChange={handleConnectionStatusChange}
+            />
           ) : (
             <div className="flex h-full items-center justify-center">
               <div className="flex w-full max-w-md flex-col gap-4 px-6">
-                <label htmlFor="agent-path" className="text-sm font-medium text-muted-foreground">
-                  Agent path
-                </label>
+                <Label htmlFor="agent-path">Agent path</Label>
                 <div className="flex items-center gap-2">
-                  <input
+                  <Input
                     id="agent-path"
-                    type="text"
-                    placeholder="e.g. #demo"
+                    placeholder={piMode ? "e.g. /pi/my-session" : "e.g. demo"}
                     value={agentPathInput}
                     onChange={(e) => setAgentPathInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSelectAgent()}
-                    className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm"
+                    onKeyDown={(e) => e.key === "Enter" && selectAgent()}
+                    className="flex-1"
                   />
-                  <button
-                    className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-                    onClick={handleSelectAgent}
-                  >
-                    Open
-                  </button>
+                  <Button onClick={selectAgent}>Open</Button>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="pi-mode"
+                    checked={piMode}
+                    onCheckedChange={setPiMode}
+                  />
+                  <Label htmlFor="pi-mode" className="text-muted-foreground">
+                    PI Mode{" "}
+                    {piMode && (
+                      <span className="text-violet-600 dark:text-violet-400">(enabled)</span>
+                    )}
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {piMode
+                    ? "PI mode connects to the Pi coding agent. Messages will be processed by the AI."
+                    : "Standard mode for raw event streams without AI processing."}
+                </p>
               </div>
             </div>
           )}

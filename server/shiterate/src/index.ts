@@ -1,281 +1,154 @@
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { logger } from "hono/logger";
-import { streamSSE } from "hono/streaming";
+/**
+ * Shiterate Server
+ *
+ * A thin wrapper around DurableStreamTestServer that:
+ * - Auto-creates streams on 404 (implicit creation - convenient for dev, may not be suitable for production)
+ * - Hooks POST to /agents/pi/* to trigger the PI adapter
+ */
+import { createServer, type IncomingMessage } from "node:http";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { DurableStreamTestServer } from "@durable-streams/server";
+import { PiSessionManager } from "./pi.ts";
 
-import { createPiAdapter, type PiAdapterHandle } from "./backend/agents/pi/adapter.ts";
-import {
-  makePiErrorEvent,
-  makePiEventReceivedEvent,
-  makePromptEvent,
-  makeSessionCreateEvent,
-  type EventStreamId,
-  type SessionCreatePayload,
-} from "./backend/agents/pi/types.ts";
+// ─────────────────────────────────────────────────────────────────────────────
+// Configuration
+// ─────────────────────────────────────────────────────────────────────────────
 
-interface StoredEvent {
-  offset: string;
-  data: unknown;
-  createdAt: string;
-}
-
-interface AgentState {
-  streamName: string;
-  eventStreamId: EventStreamId;
-  adapter: PiAdapterHandle | null;
-  createdAt: Date;
-  events: StoredEvent[];
-  nextOffset: number;
-  subscribers: Set<(event: StoredEvent) => void>;
-  sessionCreated: boolean;
-}
-
-const STREAM_OFFSET_HEADER = "Stream-Next-Offset";
-const OFFSET_START = "-1";
-const MAX_EVENTS = 1000;
-const TRIM_TO_EVENTS = 500;
-
-// Use global storage to survive HMR
-declare global {
-  var __daemon_agents: Map<string, AgentState> | undefined;
-}
-
-const agents = globalThis.__daemon_agents ?? new Map<string, AgentState>();
-globalThis.__daemon_agents = agents;
-
-function makeOffset(n: number): string {
-  return String(n).padStart(16, "0");
-}
-
-function parseOffset(offset: string): number {
-  if (offset === OFFSET_START) return -1;
-  const parsed = Number.parseInt(offset, 10);
-  return Number.isNaN(parsed) ? -1 : parsed;
-}
-
-function getStreamPathFromRequest(c: { req: { path: string; param?: (key: string) => string | undefined } }): string {
-  const wildcard = c.req.param?.("*");
-  if (wildcard && wildcard.length > 0) {
-    return decodeURIComponent(wildcard);
-  }
-
-  const rawPath = c.req.path.replace(/^\/agents\//, "");
-  return decodeURIComponent(rawPath);
-}
-
-function getOrCreateAgent(streamName: string): AgentState {
-  const existing = agents.get(streamName);
-  if (existing) return existing;
-
-  const agent: AgentState = {
-    streamName,
-    eventStreamId: streamName as EventStreamId,
-    adapter: null,
-    createdAt: new Date(),
-    events: [],
-    nextOffset: 0,
-    subscribers: new Set(),
-    sessionCreated: false,
-  };
-
-  agents.set(streamName, agent);
-  return agent;
-}
-
-function appendEvent(agent: AgentState, data: unknown): StoredEvent {
-  const event: StoredEvent = {
-    offset: makeOffset(agent.nextOffset),
-    data,
-    createdAt: new Date().toISOString(),
-  };
-
-  agent.nextOffset += 1;
-  agent.events.push(event);
-
-  if (agent.events.length > MAX_EVENTS) {
-    agent.events = agent.events.slice(-TRIM_TO_EVENTS);
-  }
-
-  for (const subscriber of agent.subscribers) {
-    subscriber(event);
-  }
-
-  return event;
-}
-
-function getEventsAfterOffset(agent: AgentState, offset: string): StoredEvent[] {
-  const numericOffset = parseOffset(offset);
-  if (numericOffset < 0) return agent.events;
-  return agent.events.filter((event) => parseOffset(event.offset) > numericOffset);
-}
-
-function getOrCreateAdapter(agent: AgentState): PiAdapterHandle {
-  if (agent.adapter) return agent.adapter;
-
-  agent.adapter = createPiAdapter({
-    onEvent: (event) => {
-      appendEvent(agent, makePiEventReceivedEvent(agent.eventStreamId, event.type, event));
-    },
-    onError: (error, context) => {
-      appendEvent(agent, makePiErrorEvent(agent.eventStreamId, error, context));
-    },
-    onSessionCreate: (payload: SessionCreatePayload) => {
-      if (agent.sessionCreated) return;
-      agent.sessionCreated = true;
-      appendEvent(
-        agent,
-        makeSessionCreateEvent(agent.eventStreamId, {
-          cwd: payload.cwd,
-          model: payload.model,
-          thinkingLevel: payload.thinkingLevel,
-          sessionFile: payload.sessionFile,
-        }),
-      );
-    },
-  });
-
-  return agent.adapter;
-}
-
-const app = new Hono();
-
-app.use("*", logger());
-app.get("/health", (c) => {
-  return c.json({ status: "ok", timestamp: new Date().toISOString() });
-});
-
-app.post("/agents/*", async (c) => {
-  const streamPath = getStreamPathFromRequest(c);
-
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.text("Invalid JSON", 400);
-  }
-
-  let messageText: string;
-  if (typeof body === "string") {
-    messageText = body;
-  } else if (typeof body === "object" && body !== null) {
-    const obj = body as Record<string, unknown>;
-    messageText = String(obj.text ?? obj.message ?? obj.prompt ?? JSON.stringify(body));
-  } else {
-    messageText = String(body);
-  }
-
-  const agent = getOrCreateAgent(streamPath);
-  const adapter = getOrCreateAdapter(agent);
-
-  const promptEvent = makePromptEvent(agent.eventStreamId, messageText);
-  const storedEvent = appendEvent(agent, promptEvent);
-
-  await adapter.prompt(messageText);
-
-  return new Response(null, {
-    status: 200,
-    headers: { [STREAM_OFFSET_HEADER]: storedEvent.offset },
-  });
-});
-
-app.get("/agents/*", (c) => {
-  const streamPath = getStreamPathFromRequest(c);
-  const offset = c.req.query("offset") ?? OFFSET_START;
-  const live = c.req.query("live");
-
-  if (live && live !== "sse") {
-    return c.text("Only SSE mode supported", 400);
-  }
-
-  return streamSSE(c, async (stream) => {
-    const agent = getOrCreateAgent(streamPath);
-
-    let lastOffset = offset;
-
-    const sendEvent = (event: StoredEvent) => {
-      lastOffset = event.offset;
-
-      const payload =
-        typeof event.data === "object" && event.data !== null
-          ? "offset" in (event.data as Record<string, unknown>)
-            ? event.data
-            : { ...(event.data as Record<string, unknown>), offset: event.offset }
-          : { data: event.data, offset: event.offset };
-
-      stream.writeSSE({ event: "data", data: JSON.stringify([payload]) });
-      stream.writeSSE({
-        event: "control",
-        data: JSON.stringify({ streamNextOffset: lastOffset, upToDate: true }),
-      });
-    };
-
-    const backlog = getEventsAfterOffset(agent, offset);
-    for (const event of backlog) {
-      sendEvent(event);
-    }
-
-    if (backlog.length === 0) {
-      const currentOffset = agent.events.length > 0 ? agent.events[agent.events.length - 1].offset : "0";
-      stream.writeSSE({
-        event: "control",
-        data: JSON.stringify({ streamNextOffset: currentOffset, upToDate: true }),
-      });
-    }
-
-    const subscriber = (event: StoredEvent) => {
-      sendEvent(event);
-    };
-
-    agent.subscribers.add(subscriber);
-
-    await new Promise<void>((resolve) => {
-      c.req.raw.signal.addEventListener("abort", () => {
-        agent.subscribers.delete(subscriber);
-        resolve();
-      });
-    });
-  });
-});
-
-app.delete("/agents/*", async (c) => {
-  const streamPath = getStreamPathFromRequest(c);
-  const agent = agents.get(streamPath);
-
-  if (!agent) {
-    return c.text("Agent not found", 404);
-  }
-
-  if (agent.adapter) {
-    await agent.adapter.close();
-  }
-
-  agents.delete(streamPath);
-  return new Response(null, { status: 204 });
-});
-
-app.on("HEAD", "/agents/*", (c) => {
-  const streamPath = getStreamPathFromRequest(c);
-
-  if (!agents.has(streamPath)) {
-    return new Response("Agent not found", { status: 404 });
-  }
-
-  return new Response(null, {
-    status: 200,
-    headers: {
-      [STREAM_OFFSET_HEADER]: "0",
-      "Content-Type": "application/json",
-    },
-  });
-});
-
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
+const HOST = process.env.HOST ?? "127.0.0.1";
+const STREAMS_PATH = process.env.STREAMS_PATH ?? path.resolve(__dirname, "../.iterate/streams");
+const PI_SESSIONS_PATH = process.env.PI_SESSIONS_PATH ?? path.resolve(__dirname, "../.iterate/pi-sessions.yaml");
 
-console.log(`🚀 Shiterate server starting on port ${PORT}...`);
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-serve({
-  fetch: app.fetch,
-  port: PORT,
+async function readBody(req: IncomingMessage): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function main() {
+  console.log(`[Server] Initializing...`);
+  console.log(`[Server] Streams path: ${STREAMS_PATH}`);
+
+  // Ensure streams directory exists
+  if (!fs.existsSync(STREAMS_PATH)) {
+    fs.mkdirSync(STREAMS_PATH, { recursive: true });
+  }
+
+  // Start the wrapped DurableStreamTestServer on an internal port
+  const dsServer = new DurableStreamTestServer({ dataDir: STREAMS_PATH, port: 0 });
+  const baseUrl = await dsServer.start();
+  console.log(`[Server] DurableStreamTestServer started at ${baseUrl}`);
+
+  // Initialize PI session manager with the store
+  // Sessions are loaded lazily when someone accesses the agent path (not on startup)
+  const piManager = new PiSessionManager(PI_SESSIONS_PATH, dsServer.store);
+  console.log(`[Server] PI session manager initialized (sessions loaded lazily)`);
+
+  // Create wrapper server
+  const server = createServer(async (req, res) => {
+    const method = req.method ?? "GET";
+    const reqUrl = req.url ?? "/";
+    const url = baseUrl + reqUrl;
+
+    // Read body for POST/PUT
+    const body = method === "POST" || method === "PUT" ? await readBody(req) : undefined;
+
+    // Forward request to wrapped server
+    let response = await fetch(url, {
+      method,
+      headers: Object.fromEntries(
+        Object.entries(req.headers)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : v!]),
+      ),
+      body,
+    });
+
+    // Auto-create streams on 404 for GET/POST
+    // NOTE: Implicit creation is convenient for dev but may not be suitable for production
+    if (response.status === 404 && (method === "GET" || method === "POST")) {
+      await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" } });
+      response = await fetch(url, {
+        method,
+        headers: Object.fromEntries(
+          Object.entries(req.headers)
+            .filter(([, v]) => v !== undefined)
+            .map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : v!]),
+        ),
+        body,
+      });
+    }
+
+    // After successful POST to /agents/pi/*, trigger PI adapter
+    if (method === "POST" && response.ok && reqUrl.startsWith("/agents/pi/")) {
+      const agentPath = reqUrl.replace(/^\/agents/, "").split("?")[0];
+      try {
+        const event = JSON.parse(new TextDecoder().decode(body));
+        await piManager.handleEvent(agentPath, event);
+      } catch (err) {
+        console.error(`[Server] Failed to handle PI event:`, err);
+      }
+    }
+
+    // Log request
+    console.log(`${method} ${reqUrl} -> ${response.status}`);
+
+    // Pipe response back - stream SSE responses, buffer others
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("text/event-stream") && response.body) {
+      // Stream SSE responses in real-time
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+      } catch {
+        // Client disconnected
+      } finally {
+        res.end();
+      }
+    } else {
+      // Buffer non-SSE responses
+      res.end(Buffer.from(await response.arrayBuffer()));
+    }
+  });
+
+  server.listen(PORT, HOST, () => {
+    console.log(`[Server] Running at http://${HOST}:${PORT}`);
+    console.log(`
+Durable Streams Protocol Endpoints (via DurableStreamTestServer):
+  PUT    /agents/:path              - Create stream
+  POST   /agents/:path              - Append event(s) to stream
+  GET    /agents/:path?offset=X&live=sse - Subscribe to stream (SSE)
+  DELETE /agents/:path              - Delete stream
+  HEAD   /agents/:path              - Get stream metadata
+
+PI Agent Streams:
+  POST   /agents/pi/:name           - Events to /pi/* streams trigger PI adapter
+
+Streams are auto-created on 404 for GET/POST requests.
+`);
+  });
+}
+
+main().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });
-
-console.log(`✅ Server running at http://localhost:${PORT}`);
