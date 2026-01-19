@@ -8,9 +8,7 @@ const BACKENDS = new Map([
   ["basic-with-pi", "@kiterate/server-basic-with-pi"],
 ]);
 
-const FRONTENDS = new Map([
-  ["shiterate", "@iterate-com/daemon"],
-]);
+const FRONTENDS = new Map([["shiterate", "@iterate-com/daemon"]]);
 
 const DEFAULT_BACKEND = "basic";
 const DEFAULT_FRONTEND = "shiterate";
@@ -41,9 +39,7 @@ process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
 if (!BACKENDS.has(backendArg)) {
-  console.error(
-    `Unknown backend "${backendArg}". Available: ${[...BACKENDS.keys()].join(", ")}`,
-  );
+  console.error(`Unknown backend "${backendArg}". Available: ${[...BACKENDS.keys()].join(", ")}`);
   process.exit(1);
 }
 

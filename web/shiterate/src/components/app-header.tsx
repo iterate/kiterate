@@ -18,9 +18,9 @@ interface AppHeaderProps {
 }
 
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
-  "pretty": "Pretty",
+  pretty: "Pretty",
   "raw-pretty": "Raw + Pretty",
-  "raw": "Raw",
+  raw: "Raw",
 };
 
 /** Connection status indicator with pulsing dot */
@@ -42,9 +42,7 @@ function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
                 : "bg-gray-400"
         }`}
       />
-      {isError && (
-        <span className="text-xs text-destructive">{status.message}</span>
-      )}
+      {isError && <span className="text-xs text-destructive">{status.message}</span>}
     </div>
   );
 }

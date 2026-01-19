@@ -6,8 +6,7 @@
   "exports": {
     ".": "./src/app.ts",
     "./store": "./src/store.ts",
-    "./feed-types": "./src/feed-types.ts",
-    "./base-reducer": "./src/base-reducer.ts"
+    "./feed-types": "./src/feed-types.ts"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

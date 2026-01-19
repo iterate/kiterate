@@ -4,15 +4,18 @@ We're going to make an extremist AI agent and learn effect!
 
 # In what way is this agent extremist?
 
-Agents only support 
+Agents only support
+
 - `.append({ event })` and
 - `.stream({ offset, live })`.
 
-And consequently their `AgentManager` only supports something like 
-- `.append({ agentPath, event })` and 
+And consequently their `AgentManager` only supports something like
+
+- `.append({ agentPath, event })` and
 - `.stream({ agentPath, offset, live })`.
 
 Everything is an event
+
 - normal LLM stuff like input/output items, including streaming text or even PCM audio chunks
 - configuration (e.g. which LLM(s) to use with which parameters)
 - the source code of functions the agent can call!
@@ -20,7 +23,7 @@ Everything is an event
 - external events (e.g. slack webhooks that the agent responds to)
 - agent-to-agent subscriptions
 - maybe even the schemas of allowed events!
-- maybe even the source code of "plugins" (if we have such a thing)! 
+- maybe even the source code of "plugins" (if we have such a thing)!
 
 Any state that is required to e.g. render boxes in a UI or produce the payload for the next LLM request is a projection/reduction of the event stream.
 
@@ -33,16 +36,17 @@ Everything is delightfully and dangerously evented and decoupled and asynchronou
 For example, the code that makes an LLM request can be written as a subscriber to a stream - rather than awkwardly part of it. When it sees an event with `{ triggerAgentTurn: "immediately" }`, it does some debouncing and makes an LLM request, which adds an event of type `llm-request-started` (and possibly llm-request-interrupted etc). Heck, maybe there's even two separate LLM requests that are made (that might be really good - see below!). But of course this means you can easily get infinite loops etc.
 
 The agent deliberately only depends on a limited set of well defined dependencies:
-1. a way to store and retrieve events 
-    - from the filesystem, sqlite, clickhouse, whatever!
+
+1. a way to store and retrieve events
+   - from the filesystem, sqlite, clickhouse, whatever!
 2. fetch
-    - used to mutate the world - also used to message other agents via POST /agents/{path}
+   - used to mutate the world - also used to message other agents via POST /agents/{path}
 3. exec-ish
-    - optional, to do stuff on a computer (if present)
+   - optional, to do stuff on a computer (if present)
 4. eval-ish
-    - required to run the code the agent produces 
+   - required to run the code the agent produces
 5. env vars
-    - all other configuration is in events - just not env vars as they might contain secrets (though in our particular case they won't...)
+   - all other configuration is in events - just not env vars as they might contain secrets (though in our particular case they won't...)
 
 The agent is designed to run in weird and wonderful environments - doesn't matter if it's a nodejs process on a big machine, a browser extension, a cloudflare durable object, or various flavours of pretend world in tests and evals.
 
@@ -69,7 +73,7 @@ Lots of fun stuff! Most importantly, a foundation that lets us express all our w
 : We believe in the future AI agents will make multiple LLM requests per "loop" - one to decide what to do and multiple others to check various safety aspects (or perhaps do "best-of-n" generation). This is easy to model without changing a lot. Just add a hook to your codemode subscriber that stops it from running any code in response to an LLM request, until the safety LLMs all gave the all-clear
 
 **Codemode workflows!**
-: What if some functions that the LLM-writen codemode code calls need human approval? With this event-sourced design, we could say that, actually, every codemode block is a _workflow_ block and every invocation of `fetch()` or `exec()` is a _step_  in a workflow. Resumable long running workflows are v easy to model using an event stream and event replay!
+: What if some functions that the LLM-writen codemode code calls need human approval? With this event-sourced design, we could say that, actually, every codemode block is a _workflow_ block and every invocation of `fetch()` or `exec()` is a _step_ in a workflow. Resumable long running workflows are v easy to model using an event stream and event replay!
 
 ### Quick note on the events stuff
 
@@ -78,7 +82,6 @@ I concede that there's a limit to this philosophy of everything being an event. 
 BUT: It's much easier to start this way, and then loosen up. You can always say "Oh well, actually let's tell the type system about all the allowed event types" or "Let's just have the events point at functions that are provided by the runtime environment" etc
 
 So let's try and think of as much stuff as possible as an event - this means it could theoretically be produced as the result of any codemode code that the LLM came up with!
-
 
 # So what will we actually build concretely?
 
@@ -94,10 +97,10 @@ Each will contain many different versions of servers and clients that we create 
 pnpm dev [backend] [frontend]
 ```
 
-| Command | Backend | Frontend |
-|---------|---------|----------|
-| `pnpm dev` | basic | shiterate |
-| `pnpm dev basic` | basic | shiterate |
+| Command                  | Backend       | Frontend  |
+| ------------------------ | ------------- | --------- |
+| `pnpm dev`               | basic         | shiterate |
+| `pnpm dev basic`         | basic         | shiterate |
 | `pnpm dev basic-with-pi` | basic-with-pi | shiterate |
 
 - **Backend** runs on port 3001
@@ -121,24 +124,26 @@ const FRONTENDS = new Map([
 ## Current implementations
 
 `server/basic`: A simple event stream server with YAML-based storage.
+
 - POST /agents/:path - Append event (auto-creates stream)
 - GET /agents/:path?offset=-1&live=sse - Read events
 
-`server/basic-with-pi`: Wraps basic server and adds PI coding agent integration for /agents/pi/* paths.
+`server/basic-with-pi`: Wraps basic server and adds PI coding agent integration for /agents/pi/\* paths.
 
 `web/shiterate`: A web frontend to interact with the server
 
 `cli/basic`: A CLI to interact with the server
+
 - `./main.ts [--url http://localhost:3001] <agent-path> append {json-event}`
 - `./main.ts [--url http://localhost:3001] <agent-path> stream [--offset X] [--live]`
 
-
 By the end of the week I'd like to
+
 - Have a decent understanding of effect
 - Have a great setup for testing and iterating on agent designs
 - Have thought through the design of ALL the things on the list below
 - An opentui / atom / effect TUI CLI skeleton we can build on
-- Have implemented as many of them as we get to 
+- Have implemented as many of them as we get to
 
 And, more concretely, have given my iterate agent in my iterate project a voice!
 
@@ -154,24 +159,27 @@ I'm imagining we'll build this from the inside out as layers of an onion
 
 Before we do anything else, I want a solid effect scaffolding of the project. Service and API definitions, tests, a durable stream that does nothing at all, etc
 
-We can start with just a basic multiplexing `Stream`. It depends on nothing, only returns whatever errors the underlying effect primitives might emit, and does v little other than 
+We can start with just a basic multiplexing `Stream`. It depends on nothing, only returns whatever errors the underlying effect primitives might emit, and does v little other than
 
 `.stream()` and `.append()`
 
-Before we build anything more, I want good tests for this level 
+Before we build anything more, I want good tests for this level
 
 ### Level 1: A durable stream
+
     - depends on storage APIs
     - emits new storage errors
     - `append` and `stream` methods that wrap the `Stream` methods and add storage
 
 ### Level 2: A durable stream with hooks
+
     - `withHooks(DurableStream)`? Not sure
     - before hook can fail and cause error events
     - not sure we actually need an after hook - that's just a stream subscriber!
     - at this level we need to deal with wakeup / resume
 
 ### Level 3: An agent
+
     - when certain events occur, we make an LLM request and add `llm-request-started` and `llm-request-completed` events etc
     - introduces lots more events for LLM context, output items, streaming chunks etc
     - Depends on an LLM transport that has append, stream and, crucially, an optional `connect` method to support websocket realtime voice APIs
@@ -193,14 +201,14 @@ Before we go any further, I'd like to get some tablestakes agent features implem
 
 Though I could also be convinced to do codemode first and then do these one by one.
 
-
 ### Level 4: An agent with codemode tool calling
-    - when the LLM makes an assistant response with a triple backticks block (or perhaps a `codemode` function toolcall), we parse the code, typecheck it and run it! 
+
+    - when the LLM makes an assistant response with a triple backticks block (or perhaps a `codemode` function toolcall), we parse the code, typecheck it and run it!
     - adds new events with types like `codemode-block-started` and `codemode-block-completed` and `codemode-block-error` etc
     - the only thing codemode execution can do is ... adding events! Some of which might trigger more LLM requests etc.
     - depends on some way to run code and `exec` and `fetch` and env vars!
 
-### Level 5+ 
+### Level 5+
 
 Now the tech tree really opens up. We can get into all of these "tablestakes" agent harness features. With lots of it we can honestly just borrow from the excellent work Mario Zechner did with pi coding agent.
 
@@ -230,19 +238,18 @@ We should now be able to build out a lot of "nuts and bolts" of agents fairly ea
 **Human in the loop approvals**
 : Since we consider the sandbox already compromised, disposable, dead, we don't even care about exec. And at that point, human approval policies are just web firewall and egress rules - a well understood concept. But need to come up with some event types etc to model this (and maybe combine with workflow codemode)
 
-
 ### Level 6: More esoteric stuff
 
 We will likely not get to build this - but it's good to discuss how we _might_ to pressure test our low level primitives
 
 **Workflow codemode**
-: Where each function invocation might take a long time and require a human approval event. 
+: Where each function invocation might take a long time and require a human approval event.
 
 **Circuit breaking**
 : Agents can easily get into infinite loops in this construction. We need to detect that - highly non-trivial esp when multiple agents involved.
 
 **Durable agent-to-agent subscriptions**
-: Agent A can add an event to Agent B, subscribing to a (filtered?) stream of its events. This means if anythign happens to agent B, agent A will know. Massive infinite loop potential here! 
+: Agent A can add an event to Agent B, subscribing to a (filtered?) stream of its events. This means if anythign happens to agent B, agent A will know. Massive infinite loop potential here!
 
 **Multi-LLM for safety**
 : We want to be able to make multiple LLM requests in parallel - one for the main LLM and a few others for prompt injection protection
@@ -262,14 +269,13 @@ So that we can build a SaaS where the main "work" is done by an agent that gets 
 **Agent to event stream mapping**
 This isn't so much about our agent loop, but worth thinking of. In realitiy, the "agent path" is a stable logical identifier that can be used for a long time. But internally, it should just have a pointer at an EventStream. Then when it's bricked that old stream or its too long or whatever, some external system can detect it (or the agent can request it), and we can point it at a new stream. The new stream can even have an event that says "You bricked your old stream but here's how you sift through it"
 
-
 # Interesting design questions
 
 While it may seem like I think we've worked it all out, it's actually quite the opposite. I think this is the right general direction, but I have no idea what _exactly_ we need to do. Lots of headscratchers come up every time I think about this.
 
 - How should we deal with event schemas and type safety in general? Should schemas be events?! Who enforced what schema where? DurableStream enforces that `offset` exists.
 
-- How are codemode blocks typechecked? Where do the types come from? 
+- How are codemode blocks typechecked? Where do the types come from?
 
 - What do we do about projections / reducers? Does every interested party just maintain their own reduced state? Is this a first class primitive? Or just something subscribers do?
 
@@ -283,4 +289,4 @@ While it may seem like I think we've worked it all out, it's actually quite the 
 
 - How do we do "single turn mode" in the CLI? Since there is no direct connection between append and events streaming back, it might be "append + wait for next idle"?
 
-- Do we use effect's _tag instead of `type` properties?! And general taxonomy and envelope format questions... EventStream or ContextStream etc. 
+- Do we use effect's \_tag instead of `type` properties?! And general taxonomy and envelope format questions... EventStream or ContextStream etc.

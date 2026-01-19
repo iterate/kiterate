@@ -63,9 +63,7 @@ function shouldPersist(event: StoredEvent): boolean {
  * Get cached events for a storage key.
  * Returns null if no cache exists.
  */
-export async function getCachedEvents(
-  storageKey: string
-): Promise<CachedStream | null> {
+export async function getCachedEvents(storageKey: string): Promise<CachedStream | null> {
   try {
     const cached = await get<CachedStream>(storageKey, store);
     return cached ?? null;
@@ -82,7 +80,7 @@ export async function getCachedEvents(
 export async function appendEvents(
   storageKey: string,
   newEvents: StoredEvent[],
-  lastOffset: string
+  lastOffset: string,
 ): Promise<void> {
   try {
     // Filter out transient events

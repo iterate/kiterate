@@ -32,7 +32,7 @@ function CodeMirror({ value, extensions }: CodeMirrorProps) {
 
     const view = new EditorView({
       doc: value,
-      extensions,
+      extensions: extensions!,
       parent: containerRef.current,
     });
 

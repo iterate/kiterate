@@ -9,5 +9,5 @@ createRoot(document.getElementById("root")!).render(
     <RawModeProvider>
       <App />
     </RawModeProvider>
-  </StrictMode>
+  </StrictMode>,
 );

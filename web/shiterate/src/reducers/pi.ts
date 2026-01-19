@@ -25,15 +25,21 @@ export function createInitialPiState(): PiState {
   return { feed: [], isStreaming: false, activeTools: new Map() };
 }
 
-function msg(role: "user" | "assistant", content: ContentBlock[], timestamp: number): MessageFeedItem {
+function msg(
+  role: "user" | "assistant",
+  content: ContentBlock[],
+  timestamp: number,
+): MessageFeedItem {
   return { kind: "message", role, content, timestamp };
 }
 
 function extractText(content: unknown[] | undefined): ContentBlock[] {
   if (!Array.isArray(content)) return [];
   return content
-    .filter((c): c is { type: "text"; text: string } => 
-      typeof c === "object" && c !== null && (c as { type?: string }).type === "text")
+    .filter(
+      (c): c is { type: "text"; text: string } =>
+        typeof c === "object" && c !== null && (c as { type?: string }).type === "text",
+    )
     .map((c) => ({ type: "text", text: c.text || "" }));
 }
 
@@ -48,8 +54,12 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
   switch (event.type) {
     case "tool_execution_start": {
       const item: ToolFeedItem = {
-        kind: "tool", toolCallId: event.toolCallId, toolName: event.toolName,
-        state: "pending", input: event.args, startTimestamp: now,
+        kind: "tool",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        state: "pending",
+        input: event.args,
+        startTimestamp: now,
       };
       const feed = [...state.feed, item];
       const activeTools = new Map(state.activeTools);
@@ -61,7 +71,11 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
       const active = state.activeTools.get(event.toolCallId);
       if (!active) return state;
       const feed = [...state.feed];
-      feed[active.feedIndex] = { ...(feed[active.feedIndex] as ToolFeedItem), state: "running", output: event.partialResult };
+      feed[active.feedIndex] = {
+        ...(feed[active.feedIndex] as ToolFeedItem),
+        state: "running",
+        output: event.partialResult,
+      };
       return { ...state, feed };
     }
 
@@ -71,10 +85,15 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
       const feed = [...state.feed];
       const updated: ToolFeedItem = {
         ...(feed[active.feedIndex] as ToolFeedItem),
-        state: event.isError ? "error" : "completed", output: event.result, endTimestamp: now,
+        state: event.isError ? "error" : "completed",
+        output: event.result,
+        endTimestamp: now,
       };
       if (event.isError) {
-        updated.errorText = typeof event.result === "string" ? event.result : (event.result as { message?: string })?.message ?? "Failed";
+        updated.errorText =
+          typeof event.result === "string"
+            ? event.result
+            : ((event.result as { message?: string })?.message ?? "Failed");
       }
       feed[active.feedIndex] = updated;
       const activeTools = new Map(state.activeTools);
@@ -85,15 +104,31 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
     case "message_start": {
       const message = event.message as { role?: string; timestamp?: number };
       if (message?.role === "assistant") {
-        return { ...state, isStreaming: true, streamingMessage: msg("assistant", [], message.timestamp ?? now) };
+        return {
+          ...state,
+          isStreaming: true,
+          streamingMessage: msg("assistant", [], message.timestamp ?? now),
+        };
       }
       return state;
     }
 
     case "message_update": {
-      const partial = (event as { assistantMessageEvent?: { partial?: { content?: unknown[]; timestamp?: number } } }).assistantMessageEvent?.partial;
+      const partial = (
+        event as {
+          assistantMessageEvent?: { partial?: { content?: unknown[]; timestamp?: number } };
+        }
+      ).assistantMessageEvent?.partial;
       if (partial?.content) {
-        return { ...state, isStreaming: true, streamingMessage: msg("assistant", extractText(partial.content), partial.timestamp ?? now) };
+        return {
+          ...state,
+          isStreaming: true,
+          streamingMessage: msg(
+            "assistant",
+            extractText(partial.content),
+            partial.timestamp ?? now,
+          ),
+        };
       }
       return state;
     }
@@ -103,8 +138,10 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
       const content = extractText(message?.content);
       if (content.some((c) => c.text.trim())) {
         const ts = message?.timestamp ?? now;
-        if (message?.role === "user") return { ...state, feed: [...state.feed, msg("user", content, ts)] };
-        if (message?.role === "assistant") return clearStreaming({ ...state, feed: [...state.feed, msg("assistant", content, ts)] });
+        if (message?.role === "user")
+          return { ...state, feed: [...state.feed, msg("user", content, ts)] };
+        if (message?.role === "assistant")
+          return clearStreaming({ ...state, feed: [...state.feed, msg("assistant", content, ts)] });
       }
       return message?.role === "assistant" ? clearStreaming(state) : state;
     }

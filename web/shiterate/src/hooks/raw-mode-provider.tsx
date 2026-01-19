@@ -47,12 +47,14 @@ export function RawModeProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <DisplayModeContext.Provider value={{ 
-      displayMode, 
-      setDisplayMode, 
-      rawEventsCount, 
-      setRawEventsCount,
-    }}>
+    <DisplayModeContext.Provider
+      value={{
+        displayMode,
+        setDisplayMode,
+        rawEventsCount,
+        setRawEventsCount,
+      }}
+    >
       {children}
     </DisplayModeContext.Provider>
   );

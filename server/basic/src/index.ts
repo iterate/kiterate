@@ -3,9 +3,9 @@
  *
  * Standalone server that serves the basic Hono app.
  */
-import { serve } from "@hono/node-server";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { serve } from "@hono/node-server";
 import { createApp, EventStore } from "./app.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ Examples:
   # Subscribe to live events (connection stays open)
   curl "http://localhost:${PORT}/agents/my-agent?live=sse"
 `);
-    }
+    },
   );
 }
 

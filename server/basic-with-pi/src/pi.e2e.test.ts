@@ -6,8 +6,8 @@
  * - PI agent can process a simple math question
  * - Returns the correct answer with expected events
  */
-import { describe, it, expect, afterAll, beforeAll } from "vitest";
 import { ChildProcess, spawn } from "node:child_process";
+import { describe, it, expect, afterAll, beforeAll } from "vitest";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -112,10 +112,7 @@ function stopServer(): void {
 // SSE Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function* subscribeToSSE(
-  path: string,
-  signal: AbortSignal
-): AsyncGenerator<SSEEvent> {
+async function* subscribeToSSE(path: string, signal: AbortSignal): AsyncGenerator<SSEEvent> {
   const url = `${SERVER_URL}/agents${path}?live=sse`;
   console.log(`[Test] Subscribing to SSE: ${url}`);
 
@@ -157,7 +154,7 @@ async function* subscribeToSSE(
             try {
               const event = JSON.parse(jsonStr) as SSEEvent;
               yield event;
-            } catch (err) {
+            } catch (_err) {
               console.error(`[Test] Failed to parse SSE event: ${jsonStr}`);
             }
           }
@@ -238,7 +235,7 @@ async function fetchAllEvents(path: string, offset = "-1"): Promise<SSEEvent[]> 
             try {
               const event = JSON.parse(jsonStr) as SSEEvent;
               events.push(event);
-            } catch (err) {
+            } catch (_err) {
               console.error(`[Test] Failed to parse SSE event: ${jsonStr}`);
             }
           }
@@ -268,7 +265,7 @@ describe("PI Agent E2E", () => {
 
   it("should deliver events to multiple concurrent subscribers", async () => {
     const CONCURRENT_AGENT_PATH = `/pi/e2e-concurrent-${TEST_RUN_ID}`;
-    
+
     const subscriber1Events: SSEEvent[] = [];
     const subscriber2Events: SSEEvent[] = [];
     const abortController1 = new AbortController();
@@ -282,7 +279,7 @@ describe("PI Agent E2E", () => {
       console.log("[Test] Subscriber 1 connecting...");
       for await (const event of subscribeToSSE(CONCURRENT_AGENT_PATH, abortController1.signal)) {
         subscriber1Events.push(event);
-        
+
         if (event.payload?.piEventType) {
           console.log(`[Test] Sub1 PI Event: ${event.payload.piEventType}`);
           if (event.payload.piEventType === "message_end") {
@@ -299,7 +296,7 @@ describe("PI Agent E2E", () => {
       console.log("[Test] Subscriber 2 connecting...");
       for await (const event of subscribeToSSE(CONCURRENT_AGENT_PATH, abortController2.signal)) {
         subscriber2Events.push(event);
-        
+
         if (event.payload?.piEventType) {
           console.log(`[Test] Sub2 PI Event: ${event.payload.piEventType}`);
           if (event.payload.piEventType === "message_end") {
@@ -329,11 +326,8 @@ describe("PI Agent E2E", () => {
     });
 
     try {
-      await Promise.race([
-        Promise.all([ssePromise1, ssePromise2]),
-        timeout,
-      ]);
-    } catch (err) {
+      await Promise.race([Promise.all([ssePromise1, ssePromise2]), timeout]);
+    } catch (_err) {
       // Ignore abort/timeout errors
     }
 
@@ -380,50 +374,50 @@ describe("PI Agent E2E", () => {
     // Subscriber 3: Late joiner fetching all historical events (no live)
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Test] === Subscriber 3: Late joiner with offset=-1 ===");
-    
+
     const subscriber3Events = await fetchAllEvents(CONCURRENT_AGENT_PATH, "-1");
-    
+
     console.log(`[Test] Subscriber 3 received ${subscriber3Events.length} events`);
-    
+
     // Should have received at least as many events as the live subscribers
     // (live subscribers may have aborted before receiving all events)
     expect(subscriber3Events.length).toBeGreaterThanOrEqual(subscriber1Events.length);
-    
+
     // Extract PI event types
     const sub3PiTypes = subscriber3Events
       .filter((e) => e.payload?.piEventType)
       .map((e) => e.payload!.piEventType);
-    
+
     console.log(`[Test] Sub3 PI types: ${sub3PiTypes.join(", ")}`);
-    
+
     // Should have the key events that live subscribers saw
     expect(sub3PiTypes).toContain("agent_start");
     expect(sub3PiTypes).toContain("message_start");
     expect(sub3PiTypes).toContain("message_end");
-    
+
     // Should contain the answer "25"
     const sub3Content = JSON.stringify(subscriber3Events);
     expect(sub3Content).toContain("25");
-    
+
     console.log("[Test] Late joiner (offset=-1) test passed!");
 
     // ─────────────────────────────────────────────────────────────────────────
     // Subscriber 4: Fetch with offset=last event (should get NO events)
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Test] === Subscriber 4: Fetch with offset=last event ===");
-    
+
     // Get the last event's offset from subscriber 3 (which saw ALL events)
     const lastOffset = subscriber3Events[subscriber3Events.length - 1]?.offset;
     expect(lastOffset).toBeDefined();
     console.log(`[Test] Last event offset: ${lastOffset}`);
-    
+
     const subscriber4Events = await fetchAllEvents(CONCURRENT_AGENT_PATH, lastOffset!);
-    
+
     console.log(`[Test] Subscriber 4 received ${subscriber4Events.length} events`);
-    
+
     // Should have received NO events (already past the last offset)
     expect(subscriber4Events.length).toBe(0);
-    
+
     console.log("[Test] Fetch with last offset test passed!");
   });
 });

@@ -6,12 +6,7 @@
  */
 
 import { useReducer, useEffect, useRef, useState, useCallback } from "react";
-import {
-  getCachedEvents,
-  appendEvents,
-  clearCache,
-  type StoredEvent,
-} from "@/lib/event-storage";
+import { getCachedEvents, appendEvents, clearCache, type StoredEvent } from "@/lib/event-storage";
 import type { ConnectionStatus, StreamEvent } from "@/reducers";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -45,7 +40,10 @@ export interface DurableStreamConfig<TState, TEvent extends StreamEvent> {
 }
 
 /** @deprecated Use DurableStreamConfig instead */
-export type PersistentStreamConfig<TState, TEvent extends StreamEvent> = DurableStreamConfig<TState, TEvent> & {
+export type PersistentStreamConfig<TState, TEvent extends StreamEvent> = DurableStreamConfig<
+  TState,
+  TEvent
+> & {
   /** @deprecated Not used - filtering happens in event-storage.ts */
   shouldPersist?: (event: TEvent) => boolean;
   /** @deprecated Not used */
@@ -90,7 +88,9 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
   const [state, dispatch] = useReducer(reducer, initialState);
   const [isStreaming, setIsStreaming] = useState(false);
   const [offset, setOffset] = useState("-1");
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ state: "connecting" });
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
+    state: "connecting",
+  });
   const [isReady, setIsReady] = useState(false);
   const [cacheLoaded, setCacheLoaded] = useState(false);
 
@@ -116,8 +116,10 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
         if (cancelled) return;
 
         if (cached && cached.events.length > 0) {
-          console.log(`[durable-stream] Loaded ${cached.events.length} cached events, lastOffset: ${cached.lastOffset}`);
-          
+          console.log(
+            `[durable-stream] Loaded ${cached.events.length} cached events, lastOffset: ${cached.lastOffset}`,
+          );
+
           // Replay cached events through reducer
           for (const event of cached.events) {
             dispatch(event as TEvent);
@@ -204,10 +206,12 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
           // Check for streaming events (LLM token streaming)
           const payload =
             event.type === "iterate:agent:harness:pi:event-received"
-              ? (event.payload as {
-                  piEventType?: string;
-                  piEvent?: { message?: { role?: string } };
-                } | undefined)
+              ? (event.payload as
+                  | {
+                      piEventType?: string;
+                      piEvent?: { message?: { role?: string } };
+                    }
+                  | undefined)
               : null;
           const piEventType = payload?.piEventType ?? event.type;
           const messageRole = payload?.piEvent?.message?.role;
@@ -281,7 +285,7 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
 
 /** @deprecated Use useDurableStream instead */
 export function usePersistentStream<TState, TEvent extends StreamEvent>(
-  config: PersistentStreamConfig<TState, TEvent>
+  config: PersistentStreamConfig<TState, TEvent>,
 ): PersistentStreamResult<TState> {
   // Ignore deprecated fields (shouldPersist, replayBatchSize)
   // Filtering now happens in event-storage.ts

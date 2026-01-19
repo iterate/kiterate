@@ -81,7 +81,7 @@ export class EventStore {
    */
   private findYamlFiles(dir: string): string[] {
     const results: string[] = [];
-    
+
     if (!fs.existsSync(dir)) return results;
 
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -102,7 +102,7 @@ export class EventStore {
    */
   private loadAllStreams(): void {
     const files = this.findYamlFiles(this.dataDir);
-    
+
     for (const filePath of files) {
       try {
         const content = fs.readFileSync(filePath, "utf-8");
@@ -113,7 +113,7 @@ export class EventStore {
         console.error(`[Store] Failed to load ${filePath}:`, err);
       }
     }
-    
+
     console.log(`[Store] Loaded ${this.streams.size} streams from ${this.dataDir}`);
   }
 
@@ -122,18 +122,21 @@ export class EventStore {
    */
   private saveStream(agentPath: string, data: StreamData): void {
     const filePath = this.getFilePath(agentPath);
-    
+
     // Ensure directory exists
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    
+
     // Filter out transient events (message_update) before persisting
-    const persistedEvents = data.events.filter(
-      (e) => (e.data as Record<string, unknown>)?.payload?.piEventType !== "message_update"
-    );
-    
+    const persistedEvents = data.events.filter((e) => {
+      const payload = (e.data as Record<string, unknown>)?.payload as
+        | Record<string, unknown>
+        | undefined;
+      return payload?.piEventType !== "message_update";
+    });
+
     const content = YAML.stringify({ ...data, events: persistedEvents });
     fs.writeFileSync(filePath, content, "utf-8");
   }
@@ -188,7 +191,7 @@ export class EventStore {
     }
     this.waiters.set(
       agentPath,
-      waiters.filter((w) => !toNotify.includes(w))
+      waiters.filter((w) => !toNotify.includes(w)),
     );
 
     return { offset, event };
@@ -226,7 +229,7 @@ export class EventStore {
         const waiters = this.waiters.get(agentPath) ?? [];
         this.waiters.set(
           agentPath,
-          waiters.filter((w) => w.resolve !== resolveWaiter)
+          waiters.filter((w) => w.resolve !== resolveWaiter),
         );
         resolve(false); // Timed out
       }, timeoutMs);

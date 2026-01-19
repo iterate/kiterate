@@ -14,12 +14,7 @@ import {
 import { useDurableStream } from "@/hooks/use-durable-stream";
 import { useRawMode, type DisplayMode } from "@/hooks/use-raw-mode";
 import { useJsonInput } from "@/hooks/use-json-input";
-import {
-  buildAgentURL,
-  createMessageEvent,
-  sendMessage,
-  sendRawJson,
-} from "@/lib/agent-api";
+import { buildAgentURL, createMessageEvent, sendMessage, sendRawJson } from "@/lib/agent-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -75,7 +70,7 @@ function getFeedItemKey(item: FeedItem): string {
 function buildDisplayFeed(
   feed: FeedItem[],
   _rawEvents: unknown[],
-  displayMode: DisplayMode
+  displayMode: DisplayMode,
 ): FeedItem[] | null {
   // "raw" mode is handled separately - just return null to signal this
   if (displayMode === "raw") {
@@ -90,14 +85,14 @@ function buildDisplayFeed(
   // "raw-pretty" mode: Show everything, group consecutive events of same type
   // Events are already in correct order from the store (by offset).
   // We group consecutive event items by type while preserving the overall order.
-  
+
   const result: FeedItem[] = [];
   let currentGroup: { typeKey: string; events: EventFeedItem[] } | null = null;
-  
+
   for (const item of feed) {
     if (item.kind === "event") {
       const typeKey = item.eventType;
-      
+
       if (currentGroup && currentGroup.typeKey === typeKey) {
         currentGroup.events.push(item);
       } else {
@@ -115,12 +110,12 @@ function buildDisplayFeed(
       result.push(item);
     }
   }
-  
+
   // Flush any remaining group
   if (currentGroup) {
     result.push(createGroupedOrSingleEvent(currentGroup.events));
   }
-  
+
   return result;
 }
 
@@ -129,7 +124,7 @@ function createGroupedOrSingleEvent(events: EventFeedItem[]): FeedItem {
   if (events.length === 1) {
     return events[0];
   }
-  
+
   const grouped: GroupedEventFeedItem = {
     kind: "grouped-event",
     eventType: events[0].eventType,
@@ -150,7 +145,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   const jsonTemplate = useMemo(
     () => JSON.stringify(createMessageEvent(agentPath, "Hello!"), null, 2),
-    [agentPath]
+    [agentPath],
   );
   const jsonInput = useJsonInput(jsonTemplate);
 
@@ -177,17 +172,17 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   // Build the display feed based on display mode (null for raw-raw mode)
   const displayFeed = useMemo(
     () => buildDisplayFeed(feed, rawEvents, displayMode),
-    [feed, rawEvents, displayMode]
+    [feed, rawEvents, displayMode],
   );
 
   const selectedRawEvent = useMemo(
     () => (selectedRawEventIndex !== null ? rawEvents[selectedRawEventIndex] : null),
-    [selectedRawEventIndex, rawEvents]
+    [selectedRawEventIndex, rawEvents],
   );
 
   // In raw mode, we render a single YAML dump instead of feed items
   const isRawMode = displayMode === "raw";
-  const isEmpty = !isRawMode && (displayFeed?.length === 0) && !streamingMessage;
+  const isEmpty = !isRawMode && displayFeed?.length === 0 && !streamingMessage;
 
   // Sync raw events count to context
   useEffect(() => {
@@ -343,7 +338,11 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
               <PromptInputTools />
               <PromptInputSubmit
                 disabled={isDisabled}
-                status={sending ? "submitted" : isStreaming ? "streaming" : undefined}
+                {...(sending
+                  ? { status: "submitted" as const }
+                  : isStreaming
+                    ? { status: "streaming" as const }
+                    : {})}
               />
             </PromptInputFooter>
           </PromptInput>

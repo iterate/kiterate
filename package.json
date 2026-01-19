@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "prepare": "effect-language-service patch",
+    "prepare": "effect-language-service patch && (is-ci || husky)",
     "dev": "doppler run -- node dev.mjs",
     "dev:basic": "doppler run -- node dev.mjs basic shiterate",
     "typecheck": "pnpm -r typecheck",
@@ -23,6 +23,9 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.26",
     "globals": "^17.0.0",
+    "husky": "9.1.7",
+    "is-ci": "4.1.0",
+    "lint-staged": "^16.2.7",
     "prettier": "^3.8.0",
     "typescript": "^5.9.3"
   },

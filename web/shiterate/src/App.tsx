@@ -11,15 +11,9 @@ import type { ConnectionStatus } from "@/reducers";
 export function App() {
   const apiURL = useMemo(() => new URL("/", window.location.href).toString(), []);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
-  
-  const {
-    selectedStream,
-    agentPathInput,
-    piMode,
-    setAgentPathInput,
-    setPiMode,
-    selectAgent,
-  } = useHashAgent();
+
+  const { selectedStream, agentPathInput, piMode, setAgentPathInput, setPiMode, selectAgent } =
+    useHashAgent();
 
   const handleConnectionStatusChange = useCallback((status: ConnectionStatus) => {
     setConnectionStatus(status);
@@ -28,15 +22,15 @@ export function App() {
   return (
     <div className="flex h-screen bg-background text-foreground">
       <section className="flex min-w-0 flex-1 flex-col">
-        <AppHeader 
-          agentId={selectedStream || undefined} 
+        <AppHeader
+          {...(selectedStream ? { agentId: selectedStream } : {})}
           connectionStatus={connectionStatus}
         />
         <div className="flex min-h-0 flex-1 flex-col">
           {selectedStream ? (
-            <AgentChat 
-              key={selectedStream} 
-              agentPath={selectedStream} 
+            <AgentChat
+              key={selectedStream}
+              agentPath={selectedStream}
               apiURL={apiURL}
               onConnectionStatusChange={handleConnectionStatusChange}
             />
@@ -56,11 +50,7 @@ export function App() {
                   <Button onClick={selectAgent}>Open</Button>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Switch
-                    id="pi-mode"
-                    checked={piMode}
-                    onCheckedChange={setPiMode}
-                  />
+                  <Switch id="pi-mode" checked={piMode} onCheckedChange={setPiMode} />
                   <Label htmlFor="pi-mode" className="text-muted-foreground">
                     PI Mode{" "}
                     {piMode && (

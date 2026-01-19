@@ -30,7 +30,11 @@ import {
 // Re-export shared types from backend
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type { EventFeedItem, ErrorFeedItem, GroupedEventFeedItem } from "@kiterate/server-basic/feed-types";
+export type {
+  EventFeedItem,
+  ErrorFeedItem,
+  GroupedEventFeedItem,
+} from "@kiterate/server-basic/feed-types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-export PI types
@@ -102,8 +106,13 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
     const piEvent = (e.payload as { piEvent?: AgentSessionEvent })?.piEvent;
     if (piEvent) {
       const innerState = innerPiReducer(
-        { feed: state.feed as InnerFeedItem[], isStreaming: state.isStreaming, streamingMessage: state.streamingMessage, activeTools: state.activeTools },
-        piEvent
+        {
+          feed: state.feed as InnerFeedItem[],
+          isStreaming: state.isStreaming,
+          streamingMessage: state.streamingMessage,
+          activeTools: state.activeTools,
+        },
+        piEvent,
       );
       return { ...innerState, feed: innerState.feed as FeedItem[], rawEvents };
     }
@@ -126,7 +135,12 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
   // Generic agent error
   if (type === AGENT_ERROR) {
     const p = e.payload as { message?: string; context?: string; stack?: string } | undefined;
-    const errItem: ErrorFeedItem = { kind: "error", message: p?.message ?? "Error", timestamp: t, raw: event };
+    const errItem: ErrorFeedItem = {
+      kind: "error",
+      message: p?.message ?? "Error",
+      timestamp: t,
+      raw: event,
+    };
     if (p?.context) errItem.context = p.context;
     if (p?.stack) errItem.stack = p.stack;
     return { ...state, feed: [...state.feed, errItem], rawEvents };

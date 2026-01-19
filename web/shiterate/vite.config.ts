@@ -19,7 +19,7 @@ const config = defineConfig({
         // Configure proxy for SSE (Server-Sent Events) streaming
         configure: (proxy, _options) => {
           // Disable buffering for SSE responses
-          proxy.on("proxyRes", (proxyRes, req, res) => {
+          proxy.on("proxyRes", (_proxyRes, req, res) => {
             // Check if this is an SSE request (has live=sse in query)
             if (req.url?.includes("live=sse")) {
               // Set headers to disable buffering

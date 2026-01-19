@@ -115,14 +115,15 @@ export class PiAdapter {
     }
   }
 
-  private async restoreSession(agentPath: string, sessionFile: string): Promise<SessionState> {
-    if (this.sessions.has(agentPath)) {
-      return this.sessions.get(agentPath)!;
-    }
-
+  private async initializeSession(
+    agentPath: string,
+    sessionManager:
+      | ReturnType<typeof SessionManager.create>
+      | ReturnType<typeof SessionManager.open>,
+    sessionFile: string,
+  ): Promise<SessionState> {
     const authStorage = discoverAuthStorage();
     const modelRegistry = discoverModels(authStorage);
-    const sessionManager = SessionManager.open(sessionFile);
     const { session } = await createAgentSession({
       sessionManager,
       authStorage,
@@ -139,31 +140,20 @@ export class PiAdapter {
     return state;
   }
 
+  private async restoreSession(agentPath: string, sessionFile: string): Promise<SessionState> {
+    if (this.sessions.has(agentPath)) return this.sessions.get(agentPath)!;
+    return this.initializeSession(agentPath, SessionManager.open(sessionFile), sessionFile);
+  }
+
   private async getOrCreateSession(agentPath: string): Promise<SessionState> {
     const existing = this.sessions.get(agentPath);
     if (existing) return existing;
 
-    const authStorage = discoverAuthStorage();
-    const modelRegistry = discoverModels(authStorage);
     const sessionManager = SessionManager.create(this.cwd);
-    const { session } = await createAgentSession({
-      sessionManager,
-      authStorage,
-      modelRegistry,
-      cwd: this.cwd,
-    });
-
     const sessionFile = sessionManager.getSessionFile();
-    if (!sessionFile) {
-      throw new Error("Session manager did not return a session file");
-    }
+    if (!sessionFile) throw new Error("Session manager did not return a session file");
 
-    const unsubscribe = session.subscribe((piEvent: AgentSessionEvent) => {
-      this.config.append(agentPath, this.wrapPiEvent(agentPath, piEvent));
-    });
-
-    const state: SessionState = { session, sessionManager, sessionFile, unsubscribe };
-    this.sessions.set(agentPath, state);
+    const state = await this.initializeSession(agentPath, sessionManager, sessionFile);
     this.saveSessions();
     return state;
   }

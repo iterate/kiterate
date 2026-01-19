@@ -3,11 +3,7 @@ import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import YAML from "yaml";
 import type { AgentSessionEvent } from "@mariozechner/pi-coding-agent";
-import {
-  piReducer,
-  createInitialPiState,
-  getMessages,
-} from "./pi";
+import { piReducer, createInitialPiState, getMessages } from "./pi";
 import {
   wrapperReducer,
   createInitialWrapperState,

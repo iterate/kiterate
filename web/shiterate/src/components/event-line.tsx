@@ -28,7 +28,13 @@ function getMessageText(content: { type: string; text: string }[]): string {
     .join("");
 }
 
-const MessageBubble = memo(function MessageBubble({ msg, isStreaming }: { msg: MessageFeedItem; isStreaming?: boolean }) {
+const MessageBubble = memo(function MessageBubble({
+  msg,
+  isStreaming,
+}: {
+  msg: MessageFeedItem;
+  isStreaming?: boolean;
+}) {
   const text = getMessageText(msg.content);
   const timeStr = new Date(msg.timestamp).toLocaleTimeString();
 
@@ -130,7 +136,7 @@ export function GroupedEventLine({ group }: { group: GroupedEventFeedItem }) {
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-hidden">
             <SerializedObjectCodeBlock
-              data={group.events.map(e => e.raw)}
+              data={group.events.map((e) => e.raw)}
               className="h-full"
               initialFormat="yaml"
               showToggle
@@ -174,7 +180,13 @@ function ToolExecution({ tool }: { tool: ToolFeedItem }) {
   );
 }
 
-export const FeedItemRenderer = memo(function FeedItemRenderer({ item, isStreaming }: { item: FeedItem; isStreaming?: boolean }) {
+export const FeedItemRenderer = memo(function FeedItemRenderer({
+  item,
+  isStreaming,
+}: {
+  item: FeedItem;
+  isStreaming?: boolean;
+}) {
   switch (item.kind) {
     case "message":
       return <MessageBubble msg={item} isStreaming={isStreaming ?? false} />;

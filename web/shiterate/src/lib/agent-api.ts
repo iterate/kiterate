@@ -42,7 +42,7 @@ export function createMessageEvent(agentPath: string, text: string): UserMessage
 export async function sendRawJson(
   apiURL: string,
   agentPath: string,
-  jsonString: string
+  jsonString: string,
 ): Promise<ApiResult> {
   try {
     const res = await fetch(buildAgentURL(apiURL, agentPath), {
@@ -64,7 +64,7 @@ export async function sendRawJson(
 export async function sendMessage(
   apiURL: string,
   agentPath: string,
-  text: string
+  text: string,
 ): Promise<ApiResult> {
   const event = createMessageEvent(agentPath, text);
   return sendRawJson(apiURL, agentPath, JSON.stringify(event, null, 2));

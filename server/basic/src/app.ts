@@ -39,7 +39,7 @@ export function createApp(config: AppConfig): Hono {
 
   app.post("/agents/:path{.+}", async (c) => {
     const agentPath = "/" + c.req.param("path");
-    
+
     let eventData: unknown;
     try {
       eventData = await c.req.json();
@@ -53,7 +53,7 @@ export function createApp(config: AppConfig): Hono {
     }
 
     const result = store.append(agentPath, eventData);
-    
+
     return c.json({ ok: true, offset: result.offset }, 200);
   });
 
@@ -77,7 +77,7 @@ export function createApp(config: AppConfig): Hono {
             sse: "Stream all existing events and keep connection open for live updates",
           },
         },
-        400
+        400,
       );
     }
 
