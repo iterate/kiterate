@@ -1,0 +1,29 @@
+{
+  "name": "kiterate",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev:server": "pnpm --filter @kiterate/server-shiterate dev",
+    "dev:web": "pnpm --filter @iterate-com/daemon dev",
+    "dev": "node dev.mjs",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --fix",
+    "lint:check": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@typescript-eslint/eslint-plugin": "^8.53.0",
+    "@typescript-eslint/parser": "^8.53.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^17.0.0",
+    "prettier": "^3.8.0",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
