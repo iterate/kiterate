@@ -136,10 +136,10 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
     case "message_end": {
       const message = event.message as { role?: string; content?: unknown[]; timestamp?: number };
       const content = extractText(message?.content);
+      // Skip user messages - they're handled by send-user-message:called in wrapperReducer
+      if (message?.role === "user") return state;
       if (content.some((c) => c.text.trim())) {
         const ts = message?.timestamp ?? now;
-        if (message?.role === "user")
-          return { ...state, feed: [...state.feed, msg("user", content, ts)] };
         if (message?.role === "assistant")
           return clearStreaming({ ...state, feed: [...state.feed, msg("assistant", content, ts)] });
       }

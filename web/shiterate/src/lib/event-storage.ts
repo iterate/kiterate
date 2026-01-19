@@ -33,6 +33,26 @@ export interface CachedStream {
 const store = createStore("shiterate-events", "streams");
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Write Queue (prevents race conditions when multiple appends happen in quick succession)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const writeQueues = new Map<string, Promise<void>>();
+
+/**
+ * Enqueue a write operation to ensure serial execution per storage key.
+ * This prevents race conditions where concurrent appendEvents calls would
+ * read stale cache state and overwrite each other's data.
+ */
+function enqueueWrite(storageKey: string, operation: () => Promise<void>): Promise<void> {
+  const currentQueue = writeQueues.get(storageKey) ?? Promise.resolve();
+  const newQueue = currentQueue.then(operation).catch((err) => {
+    console.warn("[event-storage] Write operation failed:", err);
+  });
+  writeQueues.set(storageKey, newQueue);
+  return newQueue;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Filtering
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -76,45 +96,52 @@ export async function getCachedEvents(storageKey: string): Promise<CachedStream 
 /**
  * Append new events to the cache.
  * Filters out message_update events before persisting.
+ * Uses a write queue to prevent race conditions from concurrent calls.
  */
 export async function appendEvents(
   storageKey: string,
   newEvents: StoredEvent[],
   lastOffset: string,
 ): Promise<void> {
-  try {
-    // Filter out transient events
-    const persistableEvents = newEvents.filter(shouldPersist);
+  // Filter out transient events
+  const persistableEvents = newEvents.filter(shouldPersist);
 
-    if (persistableEvents.length === 0 && !lastOffset) {
-      return; // Nothing to persist
-    }
-
-    const cached = await getCachedEvents(storageKey);
-    const existingEvents = cached?.events ?? [];
-
-    const updatedCache: CachedStream = {
-      events: [...existingEvents, ...persistableEvents],
-      lastOffset,
-      updatedAt: Date.now(),
-    };
-
-    await set(storageKey, updatedCache, store);
-  } catch (error) {
-    // Log but don't throw - caching is best-effort
-    console.warn("[event-storage] Failed to append events:", error);
+  if (persistableEvents.length === 0 && !lastOffset) {
+    return; // Nothing to persist
   }
+
+  // Use write queue to serialize operations and prevent race conditions
+  return enqueueWrite(storageKey, async () => {
+    try {
+      const cached = await getCachedEvents(storageKey);
+      const existingEvents = cached?.events ?? [];
+
+      const updatedCache: CachedStream = {
+        events: [...existingEvents, ...persistableEvents],
+        lastOffset,
+        updatedAt: Date.now(),
+      };
+
+      await set(storageKey, updatedCache, store);
+    } catch (error) {
+      // Log but don't throw - caching is best-effort
+      console.warn("[event-storage] Failed to append events:", error);
+    }
+  });
 }
 
 /**
  * Clear the cache for a storage key.
+ * Uses the write queue to ensure this doesn't race with pending appends.
  */
 export async function clearCache(storageKey: string): Promise<void> {
-  try {
-    await del(storageKey, store);
-  } catch (error) {
-    console.warn("[event-storage] Failed to clear cache:", error);
-  }
+  return enqueueWrite(storageKey, async () => {
+    try {
+      await del(storageKey, store);
+    } catch (error) {
+      console.warn("[event-storage] Failed to clear cache:", error);
+    }
+  });
 }
 
 /**

@@ -130,11 +130,14 @@ messages:
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("piReducer (inner, typed)", () => {
-  it("should reduce PI events to messages", () => {
+  it("should reduce PI events to messages (ignores user messages)", () => {
+    // piReducer ignores user messages - they're handled by send-user-message:called
+    // So we only get the assistant message from the test data
     const events = parseYamlStreamPiEvents(SINGLE_TURN_YAML);
     const state = reducePiEvents(events);
 
-    expect(getMessages(state)).toHaveLength(2);
+    expect(getMessages(state)).toHaveLength(1);
+    expect(getMessages(state)[0].role).toBe("assistant");
     expect(state.isStreaming).toBe(false);
   });
 
@@ -150,7 +153,9 @@ describe("piReducer (inner, typed)", () => {
     expect(state.streamingMessage?.role).toBe("assistant");
   });
 
-  it("should handle message_end for user", () => {
+  it("should ignore message_end for user (handled by send-user-message:called)", () => {
+    // User messages are handled by send-user-message:called in wrapperReducer,
+    // so PI SDK's message_end for user should be ignored to avoid duplicates.
     let state = createInitialPiState();
     const event: AgentSessionEvent = {
       type: "message_end",
@@ -162,8 +167,7 @@ describe("piReducer (inner, typed)", () => {
     };
     state = piReducer(state, event);
 
-    expect(getMessages(state)).toHaveLength(1);
-    expect(getMessages(state)[0].content[0].text).toBe("hello");
+    expect(getMessages(state)).toHaveLength(0);
   });
 
   it("should handle message_end for assistant", () => {
@@ -225,21 +229,30 @@ describe("piReducer (inner, typed)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("wrapperReducer (envelope extraction)", () => {
-  it("should extract PI events from envelopes", () => {
+  it("should extract PI events from envelopes (ignores PI user messages)", () => {
+    // The SINGLE_TURN_YAML doesn't have send-user-message:called events,
+    // so user messages from PI SDK are ignored. Only assistant message is kept.
     const events = parseYamlStreamEnvelopes(SINGLE_TURN_YAML);
     const state = reduceWrapperEvents(events);
 
-    expect(getWrapperMessages(state)).toHaveLength(2);
+    expect(getWrapperMessages(state)).toHaveLength(1);
+    expect(getWrapperMessages(state)[0].role).toBe("assistant");
     expect(state.rawEvents).toHaveLength(events.length);
   });
 
   it("should handle user message action events", () => {
+    // User message actions create both EventFeedItem (for raw display) and MessageFeedItem.
+    // PI SDK's message_end for user is ignored to avoid duplicates.
     let state = createInitialWrapperState();
     state = wrapperReducer(state, {
       type: "iterate:agent:action:send-user-message:called",
       payload: { content: "hello from action" },
     });
 
+    // Should have EventFeedItem and MessageFeedItem
+    expect(state.feed).toHaveLength(2);
+    expect(state.feed[0].kind).toBe("event");
+    expect(state.feed[1].kind).toBe("message");
     expect(getWrapperMessages(state)).toHaveLength(1);
     expect(getWrapperMessages(state)[0].content[0].text).toBe("hello from action");
   });
@@ -255,9 +268,11 @@ describe("wrapperReducer (envelope extraction)", () => {
       },
     });
 
-    expect(state.feed).toHaveLength(1);
-    expect(state.feed[0].kind).toBe("error");
-    expect((state.feed[0] as any).message).toBe("Authentication failed");
+    // Should have both EventFeedItem (for raw display) and ErrorFeedItem
+    expect(state.feed).toHaveLength(2);
+    expect(state.feed[0].kind).toBe("event");
+    expect(state.feed[1].kind).toBe("error");
+    expect((state.feed[1] as any).message).toBe("Authentication failed");
   });
 
   it("should create event items for unknown events", () => {

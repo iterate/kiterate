@@ -91,15 +91,17 @@ function getTimestamp(e: Record<string, unknown>): number {
 /**
  * Wrapper reducer that:
  * - Extracts PI events from envelope and delegates to inner reducer
- * - Handles user message action events
+ * - Creates EventFeedItem for ALL events (including PI events) for raw mode display
  * - Handles generic error events
- * - Creates EventFeedItem for other events
  */
 export function wrapperReducer(state: WrapperState, event: unknown): WrapperState {
   const e = event as Record<string, unknown>;
   const rawEvents = [...state.rawEvents, event];
   const t = getTimestamp(e);
   const type = (e.type as string) || "unknown";
+
+  // Always create an EventFeedItem for raw event display
+  const evtItem: EventFeedItem = { kind: "event", eventType: type, timestamp: t, raw: event };
 
   // Extract and delegate PI events to inner reducer
   if (type === PI_EVENT) {
@@ -114,11 +116,17 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
         },
         piEvent,
       );
-      return { ...innerState, feed: innerState.feed as FeedItem[], rawEvents };
+      // Add EventFeedItem for raw display, plus any pretty items from inner reducer
+      return {
+        ...innerState,
+        feed: [...state.feed, evtItem, ...innerState.feed.slice(state.feed.length)] as FeedItem[],
+        rawEvents,
+      };
     }
   }
 
-  // User message action → create user message
+  // User message action → create both EventFeedItem (for raw display) and MessageFeedItem
+  // The PI SDK's message_end for user is filtered out in pi.ts to avoid duplicates
   if (type === USER_MSG) {
     const content = (e.payload as { content?: string })?.content;
     if (content) {
@@ -128,8 +136,9 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
         content: [{ type: "text", text: content }],
         timestamp: t,
       };
-      return { ...state, feed: [...state.feed, msgItem], rawEvents };
+      return { ...state, feed: [...state.feed, evtItem, msgItem], rawEvents };
     }
+    return { ...state, feed: [...state.feed, evtItem], rawEvents };
   }
 
   // Generic agent error
@@ -143,11 +152,10 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
     };
     if (p?.context) errItem.context = p.context;
     if (p?.stack) errItem.stack = p.stack;
-    return { ...state, feed: [...state.feed, errItem], rawEvents };
+    return { ...state, feed: [...state.feed, evtItem, errItem], rawEvents };
   }
 
-  // Fallback: create event item
-  const evtItem: EventFeedItem = { kind: "event", eventType: type, timestamp: t, raw: event };
+  // Fallback: just the event item
   return { ...state, feed: [...state.feed, evtItem], rawEvents };
 }
 
