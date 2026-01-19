@@ -4,16 +4,14 @@
  *
  * Usage:
  *   ./main.ts [--url http://localhost:3001] <agent-path> append <json-event>
- *   ./main.ts [--url http://localhost:3001] <agent-path> stream [--offset X] [--live]
+ *   ./main.ts [--url http://localhost:3001] <agent-path> stream [--live]
  *
  * Examples:
  *   ./main.ts my-agent append '{"type": "hello", "message": "world"}'
  *   ./main.ts my-agent stream --live
- *   ./main.ts --url http://localhost:3001 my-agent stream --offset 5
  */
 
 import { stderr, stdout } from "node:process"
-import { DurableStream } from "@durable-streams/client"
 
 const DEFAULT_URL = "http://localhost:3001"
 
@@ -23,12 +21,11 @@ Shiterate CLI - Interact with the durable stream server
 
 Usage:
   ./main.ts [--url URL] <agent-path> append <json-event>
-  ./main.ts [--url URL] <agent-path> stream [--offset X] [--live]
+  ./main.ts [--url URL] <agent-path> stream [--live]
 
 Options:
   --url URL        Server URL (default: ${DEFAULT_URL})
-  --offset X       Start streaming from offset X (default: beginning)
-  --live           Keep connection open for live updates
+  --live           Keep connection open for live updates (SSE)
 
 Commands:
   append <json>    Append a JSON event to the stream
@@ -37,7 +34,6 @@ Commands:
 Examples:
   ./main.ts my-agent append '{"type": "message", "text": "hello"}'
   ./main.ts my-agent stream
-  ./main.ts my-agent stream --offset 5
   ./main.ts --url http://example.com:3001 my-agent stream --live
 `)
 }
@@ -58,8 +54,15 @@ async function appendEvent(baseUrl: string, agentPath: string, jsonData: string)
   }
 
   try {
-    const stream = new DurableStream({ url, contentType: "application/json" })
-    await stream.append(parsed)
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(parsed),
+    })
+    if (!res.ok) {
+      stderr.write(`Error: ${res.status} ${res.statusText}\n`)
+      process.exit(1)
+    }
     console.log(`✓ Event appended to ${agentPath}`)
   } catch (error) {
     if (error instanceof Error) {
@@ -69,23 +72,66 @@ async function appendEvent(baseUrl: string, agentPath: string, jsonData: string)
   }
 }
 
-async function streamEvents(baseUrl: string, agentPath: string, offset?: string, live?: boolean) {
-  const url = buildStreamUrl(baseUrl, agentPath)
+async function streamEvents(baseUrl: string, agentPath: string, live: boolean) {
+  const url = new URL(buildStreamUrl(baseUrl, agentPath))
+  if (live) {
+    url.searchParams.set("live", "sse")
+  }
 
   console.error(`Streaming from: ${agentPath}`)
-  console.error(`URL: ${url}`)
+  console.error(`URL: ${url.toString()}`)
   console.error("---")
 
   try {
-    const stream = new DurableStream({ url })
-    const res = await stream.stream({
-      offset,
-      live: live ? "sse" : false,
+    const res = await fetch(url.toString(), {
+      headers: { Accept: "text/event-stream" },
     })
 
-    for await (const chunk of res.bodyStream()) {
-      if (chunk.length > 0) {
-        stdout.write(chunk)
+    if (!res.ok) {
+      stderr.write(`Error: ${res.status} ${res.statusText}\n`)
+      process.exit(1)
+    }
+
+    if (!res.body) {
+      stderr.write(`Error: No response body\n`)
+      process.exit(1)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+
+      // Parse SSE events from buffer
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+
+      let currentEvent: { type?: string; data: string[] } = { data: [] }
+
+      for (const line of lines) {
+        if (line === "") {
+          // Empty line = end of event
+          if (currentEvent.type && currentEvent.data.length > 0) {
+            const data = currentEvent.data.join("\n")
+            if (currentEvent.type === "data") {
+              stdout.write(data + "\n")
+            } else if (currentEvent.type === "control") {
+              // Log control events to stderr for debugging
+              stderr.write(`[control] ${data}\n`)
+            }
+          }
+          currentEvent = { data: [] }
+        } else if (line.startsWith("event:")) {
+          currentEvent.type = line.slice(6).trim()
+        } else if (line.startsWith("data:")) {
+          const content = line.slice(5)
+          currentEvent.data.push(content.startsWith(" ") ? content.slice(1) : content)
+        }
       }
     }
   } catch (error) {
@@ -140,19 +186,10 @@ async function main() {
     }
 
     case "stream": {
-      let offset: string | undefined
       let live = false
 
       while (i < args.length) {
-        if (args[i] === "--offset") {
-          const val = args[++i]
-          if (!val) {
-            stderr.write("Error: --offset requires a value\n")
-            process.exit(1)
-          }
-          offset = val
-          i++
-        } else if (args[i] === "--live") {
+        if (args[i] === "--live") {
           live = true
           i++
         } else {
@@ -161,7 +198,7 @@ async function main() {
         }
       }
 
-      await streamEvents(baseUrl, agentPath, offset, live)
+      await streamEvents(baseUrl, agentPath, live)
       break
     }
 

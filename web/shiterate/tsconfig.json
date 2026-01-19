@@ -1,11 +1,14 @@
 {
   "compilerOptions": {
+    "plugins": [{ "name": "@effect/language-service" }],
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client", "node"],
     "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,

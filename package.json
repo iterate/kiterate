@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
+    "prepare": "effect-language-service patch",
     "dev:server": "pnpm --filter @kiterate/server-shiterate dev",
     "dev:web": "pnpm --filter @iterate-com/daemon dev",
     "dev": "doppler run -- node dev.mjs",
@@ -13,6 +14,7 @@
     "format:check": "prettier --check ."
   },
   "devDependencies": {
+    "@effect/language-service": "^0.69.2",
     "@eslint/js": "^9.39.2",
     "@typescript-eslint/eslint-plugin": "^8.53.0",
     "@typescript-eslint/parser": "^8.53.0",

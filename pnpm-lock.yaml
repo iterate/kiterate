@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      '@effect/language-service':
+        specifier: ^0.69.2
+        version: 0.69.2
       '@eslint/js':
         specifier: ^9.39.2
         version: 9.39.2
@@ -58,6 +61,53 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/durable-stream:
+    dependencies:
+      effect:
+        specifier: ^3.19.0
+        version: 3.19.14
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.14)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.10.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.9
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
+  server/durable-stream:
+    dependencies:
+      '@effect/platform':
+        specifier: ^0.82.0
+        version: 0.82.8(effect@3.19.14)
+      '@effect/platform-node':
+        specifier: ^0.78.0
+        version: 0.78.1(@effect/cluster@0.31.1(@effect/platform@0.82.8(effect@3.19.14))(@effect/rpc@0.57.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(@effect/sql@0.34.1(@effect/experimental@0.45.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14)(lmdb@3.4.4))(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(effect@3.19.14))(@effect/platform@0.82.8(effect@3.19.14))(@effect/rpc@0.57.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(@effect/sql@0.34.1(@effect/experimental@0.45.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14)(lmdb@3.4.4))(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(effect@3.19.14)
+      effect:
+        specifier: ^3.19.0
+        version: 3.19.14
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.14)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.10.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.9
+      tsx:
+        specifier: ^4.19.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
   server/reference-implementation:
     dependencies:
       '@durable-streams/server':
@@ -100,6 +150,43 @@ importers:
       yaml:
         specifier: ^2.7.0
         version: 2.8.2
+    devDependencies:
+      '@effect/vitest':
+        specifier: ^0.27.0
+        version: 0.27.0(effect@3.19.14)(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.10.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2))
+      '@types/node':
+        specifier: ^24.10.1
+        version: 24.10.9
+      tsx:
+        specifier: ^4.20.6
+        version: 4.21.0
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.9)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
+
+  server/shiterate2:
+    dependencies:
+      '@effect/platform':
+        specifier: ^0.82.0
+        version: 0.82.8(effect@3.19.14)
+      '@effect/platform-node':
+        specifier: ^0.78.0
+        version: 0.78.1(@effect/cluster@0.31.1(@effect/platform@0.82.8(effect@3.19.14))(@effect/rpc@0.57.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(@effect/sql@0.34.1(@effect/experimental@0.45.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14)(lmdb@3.4.4))(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(effect@3.19.14))(@effect/platform@0.82.8(effect@3.19.14))(@effect/rpc@0.57.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(@effect/sql@0.34.1(@effect/experimental@0.45.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14)(lmdb@3.4.4))(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(effect@3.19.14)
+      '@hono/node-server':
+        specifier: ^1.13.0
+        version: 1.19.9(hono@4.11.4)
+      '@mariozechner/pi-coding-agent':
+        specifier: ^0.42.0
+        version: 0.42.5(ws@8.19.0)(zod@4.3.5)
+      effect:
+        specifier: ^3.19.0
+        version: 3.19.14
+      hono:
+        specifier: ^4.11.3
+        version: 4.11.4
     devDependencies:
       '@effect/vitest':
         specifier: ^0.27.0
@@ -612,6 +699,10 @@ packages:
         optional: true
       lmdb:
         optional: true
+
+  '@effect/language-service@0.69.2':
+    resolution: {integrity: sha512-2On4UIuY4ChXyiz/wEJ0LDOmgWhY1Bhc9SQTVL27NEVr/6Mlux4yTWy7cPRTFwQUCmhldsF/kHMWVTkzsR348A==}
+    hasBin: true
 
   '@effect/platform-node-shared@0.32.1':
     resolution: {integrity: sha512-5BIEYmnT0xfiXdvz4j1HQ6V+XhiUUCRnPpejKBOJz4wVGvuv1ZUgsVd2R3l8jrCBwMGpzv150tcLCrHTboQ2EA==}
@@ -2624,13 +2715,13 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7
 
-  '@tanstack/db-ivm@0.1.16':
-    resolution: {integrity: sha512-DIMfUoHtAcQ1IYghU+XqprDdzToy2d6qg3R5h0DJH60XPsmRTt0qOnlu/HVZqwCP7XL/b2UhRvyR5utz/N4KGg==}
+  '@tanstack/db-ivm@0.1.17':
+    resolution: {integrity: sha512-DK7vm56CDxNuRAdsbiPs+gITJ+16tUtYgZg3BRTLYKGIDsy8sdIO7sQFq5zl7Y+aIKAPmMAbVp9UjJ75FTtwgQ==}
     peerDependencies:
       typescript: '>=4.7'
 
-  '@tanstack/db@0.5.20':
-    resolution: {integrity: sha512-vpN2JlqxdkvLQq2Uc5H0+JXfVTKaAxArOZATCbiDt+NaTw1kriA20rgJRJTPBA8RxQwNmZEUWKEYfjAn7+YI+g==}
+  '@tanstack/db@0.5.21':
+    resolution: {integrity: sha512-B6p3Lsczl/Sm3o2sk6dNcH9LZCWy1LFxUzLgCFoiNOVAMuB1fsF/ojOwBCl1ukoPNhEoSxWuBzeIZeKhyRnhdw==}
     peerDependencies:
       typescript: '>=4.7'
 
@@ -6223,7 +6314,7 @@ snapshots:
     dependencies:
       '@durable-streams/client': 0.1.5
       '@standard-schema/spec': 1.1.0
-      '@tanstack/db': 0.5.20(typescript@5.9.3)
+      '@tanstack/db': 0.5.21(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
@@ -6256,6 +6347,8 @@ snapshots:
       uuid: 11.1.0
     optionalDependencies:
       lmdb: 3.4.4
+
+  '@effect/language-service@0.69.2': {}
 
   '@effect/platform-node-shared@0.32.1(@effect/cluster@0.31.1(@effect/platform@0.82.8(effect@3.19.14))(@effect/rpc@0.57.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(@effect/sql@0.34.1(@effect/experimental@0.44.21(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14)(lmdb@3.4.4))(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(effect@3.19.14))(@effect/platform@0.82.8(effect@3.19.14))(@effect/rpc@0.57.1(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(@effect/sql@0.34.1(@effect/experimental@0.44.21(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14)(lmdb@3.4.4))(@effect/platform@0.82.8(effect@3.19.14))(effect@3.19.14))(effect@3.19.14)':
     dependencies:
@@ -7962,16 +8055,16 @@ snapshots:
       tailwindcss: 4.1.18
       vite: 7.3.1(@types/node@24.10.9)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0)(yaml@2.8.2)
 
-  '@tanstack/db-ivm@0.1.16(typescript@5.9.3)':
+  '@tanstack/db-ivm@0.1.17(typescript@5.9.3)':
     dependencies:
       fractional-indexing: 3.2.0
       sorted-btree: 1.8.1
       typescript: 5.9.3
 
-  '@tanstack/db@0.5.20(typescript@5.9.3)':
+  '@tanstack/db@0.5.21(typescript@5.9.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
-      '@tanstack/db-ivm': 0.1.16(typescript@5.9.3)
+      '@tanstack/db-ivm': 0.1.17(typescript@5.9.3)
       '@tanstack/pacer-lite': 0.2.1
       typescript: 5.9.3
 
