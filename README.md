@@ -84,20 +84,53 @@ So let's try and think of as much stuff as possible as an event - this means it 
 
 I've already made a repo structure with three folders: `server`, `web` and `cli`.
 
-Each will contain many different versions of servers and clients that we create over the week. They should be mix-and-matchable-ish because the API is always just a durable stream.
+Each will contain many different versions of servers and clients that we create over the week. They should be mix-and-matchable because the API is always just a durable stream.
 
-We start with a basic implementation:
+**Over the course of the week we'll implement MANY separate `server/` backends, as well as probably a few `web/` and `cli/` frontends — so we can experiment with ideas, compare implementations, and iterate rapidly.**
 
-`server/shiterate`: An example durable stream server I made last week to wrap the pi coding agent
+## Development
 
-`server/reference-implementation`: A super vanilla durable-streams backend using the official `@durable-streams/server` test server with purely in-memory storage. Listens on port 3000.
+```bash
+pnpm dev [backend] [frontend]
+```
+
+| Command | Backend | Frontend |
+|---------|---------|----------|
+| `pnpm dev` | basic | shiterate |
+| `pnpm dev basic` | basic | shiterate |
+| `pnpm dev basic-with-pi` | basic-with-pi | shiterate |
+
+- **Backend** runs on port 3001
+- **Frontend** runs on port 3000
+
+To add a new backend or frontend, edit `dev.mjs`:
+
+```javascript
+const BACKENDS = new Map([
+  ["basic", "@kiterate/server-basic"],
+  ["basic-with-pi", "@kiterate/server-basic-with-pi"],
+  // Add new backends here
+]);
+
+const FRONTENDS = new Map([
+  ["shiterate", "@iterate-com/daemon"],
+  // Add new frontends here
+]);
+```
+
+## Current implementations
+
+`server/basic`: A simple event stream server with YAML-based storage.
+- POST /agents/:path - Append event (auto-creates stream)
+- GET /agents/:path?offset=-1&live=sse - Read events
+
+`server/basic-with-pi`: Wraps basic server and adds PI coding agent integration for /agents/pi/* paths.
 
 `web/shiterate`: A web frontend to interact with the server
 
-`cli/shiterate`
-: A CLI to interact with the server
-- `./main.ts [--url http://localhost:3000] <agent-path> append {json-event}`
-- `./main.ts [--url http://localhost:3000] <agent-path> stream [--offset X] [--live]`
+`cli/shiterate`: A CLI to interact with the server
+- `./main.ts [--url http://localhost:3001] <agent-path> append {json-event}`
+- `./main.ts [--url http://localhost:3001] <agent-path> stream [--offset X] [--live]`
 
 
 By the end of the week I'd like to

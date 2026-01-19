@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Shiterate CLI - Simple command-line interface for the durable stream server
+ * Shiterate CLI - Simple command-line interface for the event stream server
  *
  * Usage:
  *   ./main.ts [--url http://localhost:3001] <agent-path> append <json-event>
@@ -17,15 +17,16 @@ const DEFAULT_URL = "http://localhost:3001"
 
 function printUsage() {
   console.error(`
-Shiterate CLI - Interact with the durable stream server
+Shiterate CLI - Interact with the event stream server
 
 Usage:
   ./main.ts [--url URL] <agent-path> append <json-event>
-  ./main.ts [--url URL] <agent-path> stream [--live]
+  ./main.ts [--url URL] <agent-path> stream [--live] [--offset OFFSET]
 
 Options:
   --url URL        Server URL (default: ${DEFAULT_URL})
   --live           Keep connection open for live updates (SSE)
+  --offset OFFSET  Start reading from this offset (default: -1 for beginning)
 
 Commands:
   append <json>    Append a JSON event to the stream
@@ -34,6 +35,7 @@ Commands:
 Examples:
   ./main.ts my-agent append '{"type": "message", "text": "hello"}'
   ./main.ts my-agent stream
+  ./main.ts my-agent stream --live --offset -1
   ./main.ts --url http://example.com:3001 my-agent stream --live
 `)
 }
@@ -72,8 +74,9 @@ async function appendEvent(baseUrl: string, agentPath: string, jsonData: string)
   }
 }
 
-async function streamEvents(baseUrl: string, agentPath: string, live: boolean) {
+async function streamEvents(baseUrl: string, agentPath: string, live: boolean, offset: string = "-1") {
   const url = new URL(buildStreamUrl(baseUrl, agentPath))
+  url.searchParams.set("offset", offset)
   if (live) {
     url.searchParams.set("live", "sse")
   }
@@ -120,9 +123,6 @@ async function streamEvents(baseUrl: string, agentPath: string, live: boolean) {
             const data = currentEvent.data.join("\n")
             if (currentEvent.type === "data") {
               stdout.write(data + "\n")
-            } else if (currentEvent.type === "control") {
-              // Log control events to stderr for debugging
-              stderr.write(`[control] ${data}\n`)
             }
           }
           currentEvent = { data: [] }
@@ -187,18 +187,26 @@ async function main() {
 
     case "stream": {
       let live = false
+      let offset = "-1"
 
       while (i < args.length) {
         if (args[i] === "--live") {
           live = true
           i++
+        } else if (args[i] === "--offset") {
+          if (!args[i + 1]) {
+            stderr.write("Error: --offset requires a value\n")
+            process.exit(1)
+          }
+          offset = args[i + 1]
+          i += 2
         } else {
           stderr.write(`Error: Unknown option "${args[i]}"\n`)
           process.exit(1)
         }
       }
 
-      await streamEvents(baseUrl, agentPath, live)
+      await streamEvents(baseUrl, agentPath, live, offset)
       break
     }
 

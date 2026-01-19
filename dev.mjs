@@ -1,12 +1,22 @@
 import { spawn } from "node:child_process";
 
-const target = process.argv[2];
+// Usage: pnpm dev [backend] [frontend]
+// Defaults: backend=basic, frontend=shiterate
 
-const WEB_FILTER = "@iterate-com/daemon";
 const BACKENDS = new Map([
-  ["shiterate", "@kiterate/server-shiterate"],
-  ["reference-implementation", "@kiterate/reference-implementation"],
+  ["basic", "@kiterate/server-basic"],
+  ["basic-with-pi", "@kiterate/server-basic-with-pi"],
 ]);
+
+const FRONTENDS = new Map([
+  ["shiterate", "@iterate-com/daemon"],
+]);
+
+const DEFAULT_BACKEND = "basic";
+const DEFAULT_FRONTEND = "shiterate";
+
+const backendArg = process.argv[2] ?? DEFAULT_BACKEND;
+const frontendArg = process.argv[3] ?? DEFAULT_FRONTEND;
 
 const children = [];
 
@@ -30,19 +40,30 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-if (target && !BACKENDS.has(target)) {
+if (!BACKENDS.has(backendArg)) {
   console.error(
-    `Unknown backend "${target}". Use "shiterate" or "reference-implementation", or omit the arg.`,
+    `Unknown backend "${backendArg}". Available: ${[...BACKENDS.keys()].join(", ")}`,
   );
   process.exit(1);
 }
 
-if (target) {
-  const backendFilter = BACKENDS.get(target);
-  spawnPnpm(["--filter", backendFilter, "dev"], { PORT: "3001" });
+if (!FRONTENDS.has(frontendArg)) {
+  console.error(
+    `Unknown frontend "${frontendArg}". Available: ${[...FRONTENDS.keys()].join(", ")}`,
+  );
+  process.exit(1);
 }
 
-spawnPnpm(["--filter", WEB_FILTER, "dev"]);
+const serverPkg = BACKENDS.get(backendArg);
+const webPkg = FRONTENDS.get(frontendArg);
+
+console.log(`Starting: backend=${backendArg} (${serverPkg}), frontend=${frontendArg} (${webPkg})`);
+
+// Start server (port 3001)
+spawnPnpm(["--filter", serverPkg, "dev"], { PORT: "3001" });
+
+// Start web frontend (port 3000)
+spawnPnpm(["--filter", webPkg, "dev"]);
 
 for (const child of children) {
   child.on("exit", (code) => {

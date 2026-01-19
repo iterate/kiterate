@@ -431,6 +431,12 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
               <Textarea
                 value={jsonInput.value}
                 onChange={(e) => jsonInput.setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    handleJsonSubmit();
+                  }
+                }}
                 disabled={isDisabled}
                 className="h-48 font-mono text-xs bg-muted/50 resize-none"
                 placeholder="Enter JSON event..."

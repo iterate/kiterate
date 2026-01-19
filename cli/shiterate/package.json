@@ -9,9 +9,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@durable-streams/client": "^0.1.5"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^24.10.1",
     "tsx": "^4.20.6",

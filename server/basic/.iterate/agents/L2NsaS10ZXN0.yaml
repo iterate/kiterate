@@ -1,0 +1,9 @@
+contentType: application/json
+createdAt: 2026-01-19T20:52:30.342Z
+events:
+  - offset: 0001768855950344_00000000
+    createdAt: 2026-01-19T20:52:30.344Z
+    data:
+      type: from-cli
+      msg: hello world
+      createdAt: 2026-01-19T20:52:30.342Z

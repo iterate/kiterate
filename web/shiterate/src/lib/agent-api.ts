@@ -2,7 +2,7 @@
 export interface UserMessageEvent {
   type: "iterate:agent:action:send-user-message:called";
   version: 1;
-  createdAt: string;
+  createdAt?: string; // Optional - server will set if not provided
   eventStreamId: string;
   payload: { content: string };
 }
@@ -28,12 +28,11 @@ export function buildAgentURL(apiURL: string, agentPath: string): string {
   return new URL(`/agents${encodedPath}`, apiURL).toString();
 }
 
-/** Create a user message event envelope */
+/** Create a user message event envelope (createdAt is set by server) */
 export function createMessageEvent(agentPath: string, text: string): UserMessageEvent {
   return {
     type: "iterate:agent:action:send-user-message:called",
     version: 1,
-    createdAt: new Date().toISOString(),
     eventStreamId: agentPath,
     payload: { content: text },
   };

@@ -1,0 +1,12 @@
+contentType: application/json
+createdAt: 2026-01-19T20:57:41.460Z
+events:
+  - offset: 0001768856270309_00000000
+    createdAt: 2026-01-19T20:57:50.309Z
+    data:
+      type: iterate:agent:action:send-user-message:called
+      version: 1
+      eventStreamId: /pi/hullo
+      payload:
+        content: asdasdasd
+      createdAt: 2026-01-19T20:57:50.309Z

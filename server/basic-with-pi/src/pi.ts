@@ -22,6 +22,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { Console, Schema } from "effect";
 import YAML from "yaml";
+import type { EventStore } from "@kiterate/server-basic/store";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types & Schemas
@@ -336,15 +337,6 @@ export const createPiAdapter = (callbacks: PiAdapterCallbacks = {}): PiAdapterHa
 // PI Session Manager
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Store interface compatible with both StreamStore and FileBackedStreamStore.
- */
-interface StreamStoreInterface {
-  has(path: string): boolean;
-  create(path: string, options?: { contentType?: string }): unknown;
-  append(path: string, data: Uint8Array, options?: { contentType?: string }): unknown;
-}
-
 interface PiSessionMapping {
   agentPath: string;
   sessionFile?: string;
@@ -356,14 +348,14 @@ interface PiSessionsFile {
 }
 
 /**
- * Manages PI agent sessions and their mapping to durable streams.
+ * Manages PI agent sessions and their mapping to event streams.
  */
 export class PiSessionManager {
   private sessions = new Map<string, PiAdapterHandle>();
   private sessionsFilePath: string;
-  private store: StreamStoreInterface;
+  private store: EventStore;
 
-  constructor(sessionsFilePath: string, store: StreamStoreInterface) {
+  constructor(sessionsFilePath: string, store: EventStore) {
     this.sessionsFilePath = sessionsFilePath;
     this.store = store;
   }
@@ -441,14 +433,9 @@ export class PiSessionManager {
     if (existing) return existing;
 
     const eventStreamId = agentPath as EventStreamId;
-    // agentPath already starts with /, so we use /agents + agentPath
-    const streamPath = `/agents${agentPath}`;
 
     // Ensure the stream exists BEFORE creating the adapter
-    // This is critical because ensureSession triggers callbacks that append to the stream
-    if (!this.store.has(streamPath)) {
-      this.store.create(streamPath, { contentType: "application/json" });
-    }
+    this.store.getOrCreate(agentPath);
 
     const adapter = createPiAdapter({
       onEvent: (event) => {
@@ -481,17 +468,12 @@ export class PiSessionManager {
 
   /**
    * Append an event to a stream.
-   * Agent path should start with "/" (e.g., "/pi/my-session").
    */
   private appendToStream(agentPath: string, event: unknown): void {
-    // agentPath already starts with /, so we use /agents + agentPath
-    const streamPath = `/agents${agentPath}`;
-    const data = new TextEncoder().encode(JSON.stringify(event));
-
     try {
-      this.store.append(streamPath, data, { contentType: "application/json" });
+      this.store.append(agentPath, event);
     } catch (err) {
-      console.error(`[PI Manager] Failed to append to stream ${streamPath}:`, err);
+      console.error(`[PI Manager] Failed to append to stream ${agentPath}:`, err);
     }
   }
 

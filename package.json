@@ -4,9 +4,8 @@
   "private": true,
   "scripts": {
     "prepare": "effect-language-service patch",
-    "dev:server": "pnpm --filter @kiterate/server-shiterate dev",
-    "dev:web": "pnpm --filter @iterate-com/daemon dev",
     "dev": "doppler run -- node dev.mjs",
+    "dev:shiterate": "doppler run -- node dev.mjs shiterate shiterate",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint . --fix",
     "lint:check": "eslint . --max-warnings 0",

@@ -1,0 +1,41 @@
+contentType: application/json
+createdAt: 2026-01-19T20:52:17.341Z
+events:
+  - offset: 0001768855937342_00000000
+    createdAt: 2026-01-19T20:52:17.342Z
+    data:
+      type: init
+      text: First event
+      createdAt: 2026-01-19T20:52:17.341Z
+  - offset: 0001768855938354_00000001
+    createdAt: 2026-01-19T20:52:18.354Z
+    data:
+      type: message
+      from: writer1
+      seq: 1
+      text: Hello from Writer 1!
+      createdAt: 2026-01-19T20:52:18.354Z
+  - offset: 0001768855938361_00000002
+    createdAt: 2026-01-19T20:52:18.361Z
+    data:
+      type: message
+      from: writer2
+      seq: 1
+      text: Hello from Writer 2!
+      createdAt: 2026-01-19T20:52:18.361Z
+  - offset: 0001768855938367_00000003
+    createdAt: 2026-01-19T20:52:18.367Z
+    data:
+      type: message
+      from: writer1
+      seq: 2
+      text: Second from Writer 1
+      createdAt: 2026-01-19T20:52:18.367Z
+  - offset: 0001768855938373_00000004
+    createdAt: 2026-01-19T20:52:18.373Z
+    data:
+      type: message
+      from: writer2
+      seq: 2
+      text: Second from Writer 2
+      createdAt: 2026-01-19T20:52:18.373Z

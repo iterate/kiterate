@@ -1,0 +1,39 @@
+contentType: application/json
+createdAt: 2026-01-19T20:55:37.311Z
+events:
+  - offset: 0001768856140089_00000000
+    createdAt: 2026-01-19T20:55:40.089Z
+    data:
+      type: iterate:agent:action:send-user-message:called
+      version: 1
+      eventStreamId: /asdasdasd
+      payload:
+        content: dfgdg
+      createdAt: 2026-01-19T20:55:40.089Z
+  - offset: 0001768856146649_00000001
+    createdAt: 2026-01-19T20:55:46.649Z
+    data:
+      type: iterate:agent:action:send-user-message:called
+      version: 1
+      eventStreamId: /asdasdasd
+      payload:
+        content: asdasdasd
+      createdAt: 2026-01-19T20:55:46.649Z
+  - offset: 0001768856155049_00000002
+    createdAt: 2026-01-19T20:55:55.049Z
+    data:
+      type: iterate:agent:action:asdad-user-message:called
+      version: 1
+      eventStreamId: /asdasdasd
+      payload:
+        content: Hello!
+      createdAt: 2026-01-19T20:55:55.049Z
+  - offset: 0001768856161092_00000003
+    createdAt: 2026-01-19T20:56:01.092Z
+    data:
+      type: iterate:agent:action:send-user-message:called
+      version: 1
+      eventStreamId: /asdasdasd
+      payload:
+        content: sdsd
+      createdAt: 2026-01-19T20:56:01.092Z
