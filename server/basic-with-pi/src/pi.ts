@@ -1,528 +1,430 @@
 /**
- * Pi Agent Adapter and Session Manager
+ * Pi Agent Adapter
  *
- * Connects a Pi coding agent session to an event stream.
- * - Creates Pi sessions on demand
- * - Forwards prompts to the Pi session
- * - Wraps Pi SDK events and appends to stream
+ * Simple adapter that connects PI coding agent sessions to event streams.
+ * Persists session mappings to a YAML file so sessions survive restarts.
  *
- * Events follow the Iterate envelope format with verbatim harness payloads.
+ * Interface:
+ * - handleEvent(agentPath, event) - called when any event is added to a /pi/* path
+ * - yields wrapped PI SDK events via onPiEvent callback
  */
 import * as fs from "node:fs";
-import type {
-  AgentSession,
-  AgentSessionEvent,
-  SessionManager as SessionManagerType,
-} from "@mariozechner/pi-coding-agent";
+import * as path from "node:path";
+import YAML from "yaml";
+import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
 import {
   createAgentSession,
   discoverAuthStorage,
   discoverModels,
   SessionManager,
 } from "@mariozechner/pi-coding-agent";
-import { Console, Schema } from "effect";
-import YAML from "yaml";
-import type { EventStore } from "@kiterate/server-basic/store";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types & Schemas
+// Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const EventStreamId = Schema.String.pipe(Schema.nonEmptyString());
-export type EventStreamId = typeof EventStreamId.Type;
-
-/**
- * Base envelope for all Iterate events.
- */
-export class IterateEventEnvelope extends Schema.Class<IterateEventEnvelope>("IterateEventEnvelope")({
-  type: Schema.String,
-  version: Schema.Number,
-  createdAt: Schema.String,
-  eventStreamId: EventStreamId,
-  payload: Schema.optional(Schema.Unknown),
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-}) {}
-
-// Event type constants
-export const PiEventTypes = {
-  SESSION_CREATE: "iterate:agent:harness:pi:action:session-create:called",
-  PROMPT: "iterate:agent:harness:pi:action:prompt:called",
-  ABORT: "iterate:agent:harness:pi:action:abort:called",
-  EVENT_RECEIVED: "iterate:agent:harness:pi:event-received",
-  ERROR: "iterate:agent:harness:pi:error",
-} as const;
-
-export const AgentActionTypes = {
-  SEND_USER_MESSAGE: "iterate:agent:action:send-user-message:called",
-} as const;
-
-/**
- * Payload schemas
- */
-export class SessionCreatePayload extends Schema.Class<SessionCreatePayload>("SessionCreatePayload")({
-  cwd: Schema.optional(Schema.String),
-  model: Schema.optional(Schema.String),
-  thinkingLevel: Schema.optional(Schema.String),
-  sessionFile: Schema.optional(Schema.String),
-}) {}
-
-export class PromptPayload extends Schema.Class<PromptPayload>("PromptPayload")({
-  content: Schema.String,
-}) {}
-
-export class AbortPayload extends Schema.Class<AbortPayload>("AbortPayload")({}) {}
-
-export class PiEventReceivedPayload extends Schema.Class<PiEventReceivedPayload>("PiEventReceivedPayload")({
-  piEventType: Schema.String,
-  piEvent: Schema.Unknown,
-}) {}
-
-/**
- * Typed action events
- */
-export class SessionCreateEvent extends Schema.Class<SessionCreateEvent>("SessionCreateEvent")({
-  type: Schema.Literal(PiEventTypes.SESSION_CREATE),
-  version: Schema.Number,
-  createdAt: Schema.String,
-  eventStreamId: EventStreamId,
-  payload: SessionCreatePayload,
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-}) {}
-
-export class PromptEvent extends Schema.Class<PromptEvent>("PromptEvent")({
-  type: Schema.Literal(PiEventTypes.PROMPT),
-  version: Schema.Number,
-  createdAt: Schema.String,
-  eventStreamId: EventStreamId,
-  payload: PromptPayload,
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-}) {}
-
-export class AbortEvent extends Schema.Class<AbortEvent>("AbortEvent")({
-  type: Schema.Literal(PiEventTypes.ABORT),
-  version: Schema.Number,
-  createdAt: Schema.String,
-  eventStreamId: EventStreamId,
-  payload: AbortPayload,
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-}) {}
-
-export class PiEventReceivedEvent extends Schema.Class<PiEventReceivedEvent>("PiEventReceivedEvent")({
-  type: Schema.Literal(PiEventTypes.EVENT_RECEIVED),
-  version: Schema.Number,
-  createdAt: Schema.String,
-  eventStreamId: EventStreamId,
-  payload: PiEventReceivedPayload,
-  metadata: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
-}) {}
-
-export const PiIterateEvent = Schema.Union(SessionCreateEvent, PromptEvent, AbortEvent, PiEventReceivedEvent);
-export type PiIterateEvent = typeof PiIterateEvent.Type;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Event Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const makeIterateEvent = <T extends { type: string }>(
-  eventStreamId: EventStreamId,
-  type: T["type"],
-  payload?: unknown,
-  metadata?: Record<string, unknown>,
-): IterateEventEnvelope =>
-  new IterateEventEnvelope({
-    type,
-    version: 1,
-    createdAt: new Date().toISOString(),
-    eventStreamId,
-    payload,
-    metadata,
-  });
-
-export const makeSessionCreateEvent = (
-  eventStreamId: EventStreamId,
-  options?: { cwd?: string; model?: string; thinkingLevel?: string; sessionFile?: string },
-): SessionCreateEvent => {
-  const payloadFields: { cwd?: string; model?: string; thinkingLevel?: string; sessionFile?: string } = {};
-  if (options?.cwd !== undefined) payloadFields.cwd = options.cwd;
-  if (options?.model !== undefined) payloadFields.model = options.model;
-  if (options?.thinkingLevel !== undefined) payloadFields.thinkingLevel = options.thinkingLevel;
-  if (options?.sessionFile !== undefined) payloadFields.sessionFile = options.sessionFile;
-
-  return new SessionCreateEvent({
-    type: PiEventTypes.SESSION_CREATE,
-    version: 1,
-    createdAt: new Date().toISOString(),
-    eventStreamId,
-    payload: new SessionCreatePayload(payloadFields),
-  });
-};
-
-export const makePromptEvent = (eventStreamId: EventStreamId, content: string): PromptEvent =>
-  new PromptEvent({
-    type: PiEventTypes.PROMPT,
-    version: 1,
-    createdAt: new Date().toISOString(),
-    eventStreamId,
-    payload: new PromptPayload({ content }),
-  });
-
-export const makeAbortEvent = (eventStreamId: EventStreamId): AbortEvent =>
-  new AbortEvent({
-    type: PiEventTypes.ABORT,
-    version: 1,
-    createdAt: new Date().toISOString(),
-    eventStreamId,
-    payload: new AbortPayload({}),
-  });
-
-export const makePiEventReceivedEvent = (
-  eventStreamId: EventStreamId,
-  piEventType: string,
-  piEvent: unknown,
-): PiEventReceivedEvent =>
-  new PiEventReceivedEvent({
-    type: PiEventTypes.EVENT_RECEIVED,
-    version: 1,
-    createdAt: new Date().toISOString(),
-    eventStreamId,
-    payload: new PiEventReceivedPayload({ piEventType, piEvent }),
-  });
-
-export const makePiErrorEvent = (eventStreamId: EventStreamId, error: unknown, context?: string): IterateEventEnvelope =>
-  new IterateEventEnvelope({
-    type: PiEventTypes.ERROR,
-    version: 1,
-    createdAt: new Date().toISOString(),
-    eventStreamId,
-    payload: {
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-      context,
-    },
-  });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Pi Adapter
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface PiAdapterState {
-  session: AgentSession | null;
-  sessionManager: SessionManagerType | null;
-  eventUnsubscribe: (() => void) | null;
+/** Wrapped PI event for the stream - matches iterate:agent:harness:pi:event-received */
+export interface WrappedPiEvent {
+  type: "iterate:agent:harness:pi:event-received";
+  version: number;
+  createdAt: string;
+  eventStreamId: string;
+  payload: {
+    piEventType: string;
+    piEvent: AgentSessionEvent;
+  };
 }
 
-export interface PiAdapterCallbacks {
-  onEvent?: (event: AgentSessionEvent) => void;
-  onError?: (error: unknown, context: string) => void;
-  onSessionCreate?: (payload: SessionCreatePayload) => void;
+/** Error event - matches iterate:agent:harness:pi:error */
+export interface PiErrorEvent {
+  type: "iterate:agent:harness:pi:error";
+  version: number;
+  createdAt: string;
+  eventStreamId: string;
+  payload: {
+    message: string;
+    context?: string;
+    stack?: string;
+  };
 }
 
-export interface PiAdapterHandle {
-  ensureSession: (payload?: SessionCreatePayload) => Promise<void>;
-  prompt: (content: string) => Promise<void>;
-  abort: () => Promise<void>;
-  close: () => Promise<void>;
+/** Session created event */
+export interface PiSessionCreatedEvent {
+  type: "iterate:agent:harness:pi:action:session-create:called";
+  version: number;
+  createdAt: string;
+  eventStreamId: string;
+  payload: {
+    cwd: string;
+    sessionFile: string;
+  };
 }
 
-/**
- * Create and run a Pi adapter for a given agent session.
- */
-export const createPiAdapter = (callbacks: PiAdapterCallbacks = {}): PiAdapterHandle => {
-  const state: PiAdapterState = {
-    session: null,
-    sessionManager: null,
-    eventUnsubscribe: null,
+/** Session restored event */
+export interface PiSessionRestoredEvent {
+  type: "iterate:agent:harness:pi:session-restored";
+  version: number;
+  createdAt: string;
+  eventStreamId: string;
+  payload: {
+    sessionFile: string;
   };
+}
 
-  const subscribeToPiEvents = (session: AgentSession): void => {
-    if (state.eventUnsubscribe) {
-      state.eventUnsubscribe();
-    }
-    state.eventUnsubscribe = session.subscribe((event) => {
-      callbacks.onEvent?.(event);
-    });
-  };
+export type PiOutputEvent = WrappedPiEvent | PiErrorEvent | PiSessionCreatedEvent | PiSessionRestoredEvent;
 
-  const ensureSession = async (payload?: SessionCreatePayload): Promise<void> => {
-    if (state.session) return;
+/** Callback when PI produces events */
+export type OnPiEvent = (agentPath: string, event: PiOutputEvent) => void;
 
-    try {
-      await Console.log("[Pi Adapter] Creating session...");
-
-      const authStorage = discoverAuthStorage();
-      const modelRegistry = discoverModels(authStorage);
-      const cwd = payload?.cwd ?? process.env.INIT_CWD ?? process.cwd();
-
-      const sessionManager = payload?.sessionFile
-        ? SessionManager.open(payload.sessionFile)
-        : SessionManager.create(cwd);
-
-      const { session } = await createAgentSession({
-        sessionManager,
-        authStorage,
-        modelRegistry,
-        cwd,
-      });
-
-      state.session = session;
-      state.sessionManager = sessionManager;
-      subscribeToPiEvents(session);
-
-      callbacks.onSessionCreate?.(
-        new SessionCreatePayload({
-          cwd,
-          model: payload?.model,
-          thinkingLevel: payload?.thinkingLevel,
-          sessionFile: payload?.sessionFile,
-        }),
-      );
-
-      const sessionFile = sessionManager.getSessionFile();
-      await Console.log(`[Pi Adapter] Session created${sessionFile ? ` (file: ${sessionFile})` : " (in-memory)"}`);
-    } catch (error) {
-      await Console.error(`[Pi Adapter] Session create error: ${error instanceof Error ? error.message : String(error)}`);
-      callbacks.onError?.(error, "session-create");
-      throw error;
-    }
-  };
-
-  const prompt = async (content: string): Promise<void> => {
-    try {
-      if (!state.session) {
-        await Console.error("[Pi Adapter] No session - creating session before prompt");
-        await ensureSession();
-      }
-
-      if (!state.session) {
-        await Console.error("[Pi Adapter] No session - ignoring prompt");
-        callbacks.onError?.("No session available", "prompt");
-        return;
-      }
-
-      await Console.log(`[Pi Adapter] Sending prompt: ${content.slice(0, 50)}...`);
-      await state.session.prompt(content);
-      await Console.log("[Pi Adapter] Prompt completed");
-    } catch (error) {
-      await Console.error(`[Pi Adapter] Prompt error: ${error instanceof Error ? error.message : String(error)}`);
-      callbacks.onError?.(error, "prompt");
-    }
-  };
-
-  const abort = async (): Promise<void> => {
-    if (!state.session) {
-      await Console.error("[Pi Adapter] No session - ignoring abort");
-      return;
-    }
-
-    await Console.log("[Pi Adapter] Aborting...");
-    await state.session.abort();
-    await Console.log("[Pi Adapter] Aborted");
-  };
-
-  const close = async (): Promise<void> => {
-    if (state.eventUnsubscribe) {
-      state.eventUnsubscribe();
-    }
-  };
-
-  return {
-    ensureSession,
-    prompt,
-    abort,
-    close,
-  };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PI Session Manager
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface PiSessionMapping {
+/** Persisted session mapping */
+interface SessionMapping {
   agentPath: string;
-  sessionFile?: string;
+  sessionFile: string;
   createdAt: string;
 }
 
-interface PiSessionsFile {
-  sessions: PiSessionMapping[];
+interface SessionsFile {
+  sessions: SessionMapping[];
 }
 
-/**
- * Manages PI agent sessions and their mapping to event streams.
- */
-export class PiSessionManager {
-  private sessions = new Map<string, PiAdapterHandle>();
-  private sessionsFilePath: string;
-  private store: EventStore;
+// ─────────────────────────────────────────────────────────────────────────────
+// Session Manager
+// ─────────────────────────────────────────────────────────────────────────────
 
-  constructor(sessionsFilePath: string, store: EventStore) {
+interface SessionState {
+  session: AgentSession;
+  sessionManager: ReturnType<typeof SessionManager.create> | ReturnType<typeof SessionManager.open>;
+  sessionFile: string;
+  unsubscribe: () => void;
+}
+
+export class PiAdapter {
+  private sessions = new Map<string, SessionState>();
+  private onPiEvent: OnPiEvent;
+  private sessionsFilePath: string;
+  private cwd: string;
+
+  constructor(onPiEvent: OnPiEvent, sessionsFilePath: string) {
+    this.onPiEvent = onPiEvent;
     this.sessionsFilePath = sessionsFilePath;
-    this.store = store;
+    this.cwd = process.env.INIT_CWD ?? process.cwd();
+
+    // Ensure directory exists
+    const dir = path.dirname(sessionsFilePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
   }
 
   /**
-   * Load sessions from YAML file and reconnect to existing PI sessions.
+   * Load persisted sessions and reconnect to existing PI sessions.
    */
   async loadSessions(): Promise<void> {
     if (!fs.existsSync(this.sessionsFilePath)) {
-      console.log(`[PI Manager] No sessions file found at ${this.sessionsFilePath}`);
+      console.log(`[Pi] No sessions file found at ${this.sessionsFilePath}`);
       return;
     }
 
     try {
       const content = fs.readFileSync(this.sessionsFilePath, "utf-8");
-      const data = YAML.parse(content) as PiSessionsFile;
+      const data = YAML.parse(content) as SessionsFile;
 
       if (!data?.sessions?.length) {
-        console.log(`[PI Manager] No sessions in file`);
+        console.log(`[Pi] No sessions in file`);
         return;
       }
 
-      console.log(`[PI Manager] Loading ${data.sessions.length} sessions...`);
+      console.log(`[Pi] Loading ${data.sessions.length} sessions...`);
 
       for (const mapping of data.sessions) {
         try {
-          await this.getOrCreateAdapter(mapping.agentPath, mapping.sessionFile);
-          console.log(`[PI Manager] Restored session for ${mapping.agentPath}`);
+          await this.restoreSession(mapping.agentPath, mapping.sessionFile);
         } catch (err) {
-          console.error(`[PI Manager] Failed to restore session for ${mapping.agentPath}:`, err);
+          console.error(`[Pi] Failed to restore session for ${mapping.agentPath}:`, err);
         }
       }
     } catch (err) {
-      console.error(`[PI Manager] Failed to load sessions file:`, err);
+      console.error(`[Pi] Failed to load sessions file:`, err);
     }
   }
 
   /**
-   * Save sessions to YAML file.
+   * Save session mappings to YAML file.
    */
   private saveSessions(): void {
-    const sessions: PiSessionMapping[] = [];
+    const sessions: SessionMapping[] = [];
 
-    for (const agentPath of this.sessions.keys()) {
+    for (const [agentPath, state] of this.sessions.entries()) {
       sessions.push({
         agentPath,
+        sessionFile: state.sessionFile,
         createdAt: new Date().toISOString(),
       });
     }
 
-    const data: PiSessionsFile = { sessions };
+    const data: SessionsFile = { sessions };
     const content = YAML.stringify(data);
 
     try {
       fs.writeFileSync(this.sessionsFilePath, content, "utf-8");
+      console.log(`[Pi] Saved ${sessions.length} session mappings`);
     } catch (err) {
-      console.error(`[PI Manager] Failed to save sessions file:`, err);
+      console.error(`[Pi] Failed to save sessions file:`, err);
     }
   }
 
   /**
-   * Check if a path is a PI agent path (starts with /pi/).
-   * Agent paths should always start with "/" (e.g., "/pi/my-session").
+   * Handle an incoming event on a PI agent path.
+   * - Ensures session exists (creates if needed)
+   * - If it's a user message, prompts the PI session
    */
-  isPiAgentPath(agentPath: string): boolean {
-    return agentPath.startsWith("/pi/");
+  async handleEvent(agentPath: string, event: unknown): Promise<void> {
+    console.log(`[Pi] handleEvent called for ${agentPath}`);
+    
+    // Ensure session exists
+    let state: SessionState;
+    try {
+      state = await this.getOrCreateSession(agentPath);
+    } catch (err) {
+      console.error(`[Pi] Failed to get/create session for ${agentPath}:`, err);
+      throw err;
+    }
+
+    // Check if it's a user message
+    const content = extractUserMessage(event);
+    if (content) {
+      console.log(`[Pi] Prompting ${agentPath}: ${content.slice(0, 50)}...`);
+      try {
+        await state.session.prompt(content);
+        console.log(`[Pi] Prompt completed for ${agentPath}`);
+      } catch (err) {
+        console.error(`[Pi] Prompt error for ${agentPath}:`, err);
+        this.emitError(agentPath, err, "prompt");
+      }
+    } else {
+      console.log(`[Pi] No user message content found in event for ${agentPath}`);
+    }
   }
 
   /**
-   * Get or create a PI adapter for an agent path.
-   * Agent path should start with "/" (e.g., "/pi/my-session").
+   * Restore an existing PI session from a session file.
    */
-  async getOrCreateAdapter(agentPath: string, sessionFile?: string): Promise<PiAdapterHandle> {
+  private async restoreSession(agentPath: string, sessionFile: string): Promise<SessionState> {
+    if (this.sessions.has(agentPath)) {
+      return this.sessions.get(agentPath)!;
+    }
+
+    console.log(`[Pi] Restoring session for ${agentPath} from ${sessionFile}`);
+
+    try {
+      const authStorage = discoverAuthStorage();
+      const modelRegistry = discoverModels(authStorage);
+
+      const sessionManager = SessionManager.open(sessionFile);
+      const { session } = await createAgentSession({
+        sessionManager,
+        authStorage,
+        modelRegistry,
+        cwd: this.cwd,
+      });
+
+      // Subscribe to PI events - wrap in try-catch to prevent unhandled errors
+      const unsubscribe = session.subscribe((piEvent) => {
+        try {
+          this.onPiEvent(agentPath, {
+            type: "iterate:agent:harness:pi:event-received",
+            version: 1,
+            createdAt: new Date().toISOString(),
+            eventStreamId: agentPath,
+            payload: {
+              piEventType: piEvent.type,
+              piEvent,
+            },
+          });
+        } catch (err) {
+          console.error(`[Pi] Error in event callback for ${agentPath}:`, err);
+        }
+      });
+
+      const state: SessionState = { session, sessionManager, sessionFile, unsubscribe };
+      this.sessions.set(agentPath, state);
+
+      // Emit session restored event
+      this.onPiEvent(agentPath, {
+        type: "iterate:agent:harness:pi:session-restored",
+        version: 1,
+        createdAt: new Date().toISOString(),
+        eventStreamId: agentPath,
+        payload: {
+          sessionFile,
+        },
+      });
+
+      console.log(`[Pi] Session restored for ${agentPath}`);
+      return state;
+    } catch (err) {
+      this.emitError(agentPath, err, "session-restore");
+      throw err;
+    }
+  }
+
+  /**
+   * Get or create a PI session for an agent path.
+   */
+  private async getOrCreateSession(agentPath: string): Promise<SessionState> {
     const existing = this.sessions.get(agentPath);
     if (existing) return existing;
 
-    const eventStreamId = agentPath as EventStreamId;
+    console.log(`[Pi] Creating session for ${agentPath}`);
 
-    // Ensure the stream exists BEFORE creating the adapter
-    this.store.getOrCreate(agentPath);
+    try {
+      console.log(`[Pi] Discovering auth storage...`);
+      const authStorage = discoverAuthStorage();
+      console.log(`[Pi] Discovering models...`);
+      const modelRegistry = discoverModels(authStorage);
 
-    const adapter = createPiAdapter({
-      onEvent: (event) => {
-        this.appendToStream(agentPath, makePiEventReceivedEvent(eventStreamId, event.type, event));
-      },
-      onError: (error, context) => {
-        this.appendToStream(agentPath, makePiErrorEvent(eventStreamId, error, context));
-      },
-      onSessionCreate: (payload: SessionCreatePayload) => {
-        this.appendToStream(
-          agentPath,
-          makeSessionCreateEvent(eventStreamId, {
-            cwd: payload.cwd,
-            model: payload.model,
-            thinkingLevel: payload.thinkingLevel,
-            sessionFile: payload.sessionFile,
-          }),
-        );
+      console.log(`[Pi] Creating session manager in ${this.cwd}...`);
+      const sessionManager = SessionManager.create(this.cwd);
+      console.log(`[Pi] Creating agent session...`);
+      const { session } = await createAgentSession({
+        sessionManager,
+        authStorage,
+        modelRegistry,
+        cwd: this.cwd,
+      });
+      console.log(`[Pi] Agent session created`);
+
+      const sessionFile = sessionManager.getSessionFile();
+      if (!sessionFile) {
+        throw new Error("Session manager did not return a session file");
+      }
+
+      // Subscribe to PI events - wrap in try-catch to prevent unhandled errors
+      console.log(`[Pi] Subscribing to session events...`);
+      const unsubscribe = session.subscribe((piEvent) => {
+        try {
+          this.onPiEvent(agentPath, {
+            type: "iterate:agent:harness:pi:event-received",
+            version: 1,
+            createdAt: new Date().toISOString(),
+            eventStreamId: agentPath,
+            payload: {
+              piEventType: piEvent.type,
+              piEvent,
+            },
+          });
+        } catch (err) {
+          console.error(`[Pi] Error in event callback for ${agentPath}:`, err);
+        }
+      });
+
+      const state: SessionState = { session, sessionManager, sessionFile, unsubscribe };
+      this.sessions.set(agentPath, state);
+
+      // Save mapping
+      console.log(`[Pi] Saving session mapping...`);
+      this.saveSessions();
+
+      // Emit session created event
+      this.onPiEvent(agentPath, {
+        type: "iterate:agent:harness:pi:action:session-create:called",
+        version: 1,
+        createdAt: new Date().toISOString(),
+        eventStreamId: agentPath,
+        payload: {
+          cwd: this.cwd,
+          sessionFile,
+        },
+      });
+
+      console.log(`[Pi] Session created for ${agentPath} (file: ${sessionFile})`);
+      return state;
+    } catch (err) {
+      this.emitError(agentPath, err, "session-create");
+      throw err;
+    }
+  }
+
+  private emitError(agentPath: string, error: unknown, context?: string): void {
+    this.onPiEvent(agentPath, {
+      type: "iterate:agent:harness:pi:error",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      eventStreamId: agentPath,
+      payload: {
+        message: error instanceof Error ? error.message : String(error),
+        context,
+        stack: error instanceof Error ? error.stack : undefined,
       },
     });
-
-    // Ensure session is created
-    await adapter.ensureSession({ sessionFile });
-
-    this.sessions.set(agentPath, adapter);
-    this.saveSessions();
-
-    return adapter;
   }
 
   /**
-   * Append an event to a stream.
+   * Close a session.
    */
-  private appendToStream(agentPath: string, event: unknown): void {
-    try {
-      this.store.append(agentPath, event);
-    } catch (err) {
-      console.error(`[PI Manager] Failed to append to stream ${agentPath}:`, err);
-    }
-  }
-
-  /**
-   * Handle an incoming event on a PI stream.
-   * Returns true if the event was handled (was a prompt).
-   */
-  async handleEvent(agentPath: string, event: unknown): Promise<boolean> {
-    if (!this.isPiAgentPath(agentPath)) return false;
-
-    const e = event as Record<string, unknown>;
-    const eventType = e.type as string | undefined;
-
-    // Handle prompt events
-    if (eventType === "iterate:agent:harness:pi:action:prompt:called") {
-      const payload = e.payload as { content?: string } | undefined;
-      const content = payload?.content;
-
-      if (content) {
-        const adapter = await this.getOrCreateAdapter(agentPath);
-        await adapter.prompt(content);
-        return true;
-      }
-    }
-
-    // Handle generic user message events
-    if (eventType === "iterate:agent:action:send-user-message:called") {
-      const payload = e.payload as { content?: string; text?: string; message?: string } | undefined;
-      const content = payload?.content ?? payload?.text ?? payload?.message;
-
-      if (content) {
-        const adapter = await this.getOrCreateAdapter(agentPath);
-        await adapter.prompt(content);
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Close a session for an agent path.
-   */
-  async closeSession(agentPath: string): Promise<void> {
-    const adapter = this.sessions.get(agentPath);
-    if (adapter) {
-      await adapter.close();
+  closeSession(agentPath: string): void {
+    const state = this.sessions.get(agentPath);
+    if (state) {
+      state.unsubscribe();
       this.sessions.delete(agentPath);
       this.saveSessions();
+      console.log(`[Pi] Session closed for ${agentPath}`);
     }
   }
+
+  /**
+   * Close all sessions.
+   */
+  closeAll(): void {
+    for (const agentPath of this.sessions.keys()) {
+      this.closeSession(agentPath);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract user message content from various event formats.
+ */
+function extractUserMessage(event: unknown): string | null {
+  if (typeof event !== "object" || event === null) return null;
+
+  const e = event as Record<string, unknown>;
+  const eventType = e.type as string | undefined;
+
+  // Direct content field
+  if (typeof e.content === "string" && e.content) {
+    return e.content;
+  }
+
+  // Payload with content
+  if (typeof e.payload === "object" && e.payload !== null) {
+    const payload = e.payload as Record<string, unknown>;
+    if (typeof payload.content === "string" && payload.content) {
+      return payload.content;
+    }
+    if (typeof payload.text === "string" && payload.text) {
+      return payload.text;
+    }
+    if (typeof payload.message === "string" && payload.message) {
+      return payload.message;
+    }
+  }
+
+  // Known user message event types
+  if (
+    eventType === "iterate:agent:action:send-user-message:called" ||
+    eventType === "iterate:agent:harness:pi:action:prompt:called" ||
+    eventType === "user-message" ||
+    eventType === "prompt"
+  ) {
+    // Already checked payload above, try text/message fields
+    if (typeof e.text === "string" && e.text) return e.text;
+    if (typeof e.message === "string" && e.message) return e.message;
+  }
+
+  return null;
 }

@@ -2,7 +2,8 @@
  * YAML-based Event Store
  *
  * Simple file-based storage for event streams.
- * Each agent path maps to a YAML file in .iterate/agents/
+ * Agent path maps directly to file path:
+ *   /pi/bla → .iterate/agents/pi/bla.yaml
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -47,18 +48,23 @@ export class EventStore {
   }
 
   /**
-   * Encode agent path to safe filename
+   * Convert agent path to file path.
+   * /pi/bla → {dataDir}/pi/bla.yaml
    */
-  private encodePathToFilename(agentPath: string): string {
-    // Base64 encode the path for safe filenames
-    return Buffer.from(agentPath).toString("base64url") + ".yaml";
+  private getFilePath(agentPath: string): string {
+    // Remove leading slash and add .yaml
+    const relativePath = agentPath.startsWith("/") ? agentPath.slice(1) : agentPath;
+    return path.join(this.dataDir, relativePath + ".yaml");
   }
 
   /**
-   * Get file path for an agent
+   * Convert file path back to agent path.
+   * {dataDir}/pi/bla.yaml → /pi/bla
    */
-  private getFilePath(agentPath: string): string {
-    return path.join(this.dataDir, this.encodePathToFilename(agentPath));
+  private filePathToAgentPath(filePath: string): string {
+    const relativePath = path.relative(this.dataDir, filePath);
+    const withoutExt = relativePath.replace(/\.yaml$/, "");
+    return "/" + withoutExt;
   }
 
   /**
@@ -71,27 +77,43 @@ export class EventStore {
   }
 
   /**
+   * Recursively find all .yaml files in a directory.
+   */
+  private findYamlFiles(dir: string): string[] {
+    const results: string[] = [];
+    
+    if (!fs.existsSync(dir)) return results;
+
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...this.findYamlFiles(fullPath));
+      } else if (entry.isFile() && entry.name.endsWith(".yaml")) {
+        results.push(fullPath);
+      }
+    }
+
+    return results;
+  }
+
+  /**
    * Load all streams from disk on startup
    */
   private loadAllStreams(): void {
-    if (!fs.existsSync(this.dataDir)) return;
-
-    const files = fs.readdirSync(this.dataDir).filter((f) => f.endsWith(".yaml"));
-    for (const file of files) {
+    const files = this.findYamlFiles(this.dataDir);
+    
+    for (const filePath of files) {
       try {
-        const filePath = path.join(this.dataDir, file);
         const content = fs.readFileSync(filePath, "utf-8");
         const data = YAML.parse(content) as StreamData;
-        
-        // Decode the path from filename
-        const encodedPath = file.replace(".yaml", "");
-        const agentPath = Buffer.from(encodedPath, "base64url").toString("utf-8");
-        
+        const agentPath = this.filePathToAgentPath(filePath);
         this.streams.set(agentPath, data);
       } catch (err) {
-        console.error(`[Store] Failed to load ${file}:`, err);
+        console.error(`[Store] Failed to load ${filePath}:`, err);
       }
     }
+    
     console.log(`[Store] Loaded ${this.streams.size} streams from ${this.dataDir}`);
   }
 
@@ -100,6 +122,13 @@ export class EventStore {
    */
   private saveStream(agentPath: string, data: StreamData): void {
     const filePath = this.getFilePath(agentPath);
+    
+    // Ensure directory exists
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
     const content = YAML.stringify(data);
     fs.writeFileSync(filePath, content, "utf-8");
   }

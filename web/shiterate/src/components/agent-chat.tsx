@@ -10,7 +10,7 @@ import {
   type EventFeedItem,
   type GroupedEventFeedItem,
 } from "@/reducers/messages-reducer";
-import { usePersistentStream, excludeTypes, type ConnectionStatus } from "@/reducers/persistent-stream-reducer";
+import { usePersistentStream, excludeTypes, type ConnectionStatus } from "@/reducers/durable-stream-reducer";
 import { useRawMode, type DisplayMode } from "@/hooks/use-raw-mode";
 import { useJsonInput } from "@/hooks/use-json-input";
 import {

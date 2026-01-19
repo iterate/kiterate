@@ -5,7 +5,7 @@ import {
   excludeChunks,
   onlyTypes,
   excludeTypes,
-} from "./persistent-stream-reducer.ts";
+} from "./durable-stream-reducer.ts";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mocks

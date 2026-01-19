@@ -6,7 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select.tsx";
-import type { ConnectionStatus } from "@/reducers/persistent-stream-reducer";
+import type { ConnectionStatus } from "@/reducers/durable-stream-reducer";
 
 interface AppHeaderProps {
   agentId?: string;

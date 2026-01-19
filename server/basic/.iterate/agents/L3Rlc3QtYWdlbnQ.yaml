@@ -1,9 +1,0 @@
-contentType: application/json
-createdAt: 2026-01-19T20:52:10.609Z
-events:
-  - offset: 0001768855930611_00000000
-    createdAt: 2026-01-19T20:52:10.611Z
-    data:
-      type: test
-      msg: hello
-      createdAt: 2026-01-19T20:52:10.609Z

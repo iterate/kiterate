@@ -1,5 +1,1 @@
-sessions:
-  - agentPath: /pi/hullo2
-    createdAt: 2026-01-19T21:01:23.407Z
-  - agentPath: /pi/hullo3
-    createdAt: 2026-01-19T21:01:23.407Z
+sessions: []

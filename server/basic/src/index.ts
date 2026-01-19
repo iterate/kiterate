@@ -39,16 +39,21 @@ async function main() {
       console.log(`
 Endpoints:
   POST /agents/:path              - Append event (auto-creates stream)
-  GET  /agents/:path              - Read all events as JSON array
-  GET  /agents/:path?offset=X     - Read events from offset
-  GET  /agents/:path?live=sse     - Subscribe to events (SSE)
+  GET  /agents/:path              - Stream all events (SSE), then close
+  GET  /agents/:path?offset=X     - Stream events from offset (SSE), then close
+  GET  /agents/:path?live=sse     - Stream events (SSE), keep connection open
 
 Examples:
+  # Post an event
   curl -X POST http://localhost:${PORT}/agents/my-agent \\
     -H "Content-Type: application/json" \\
     -d '{"type": "message", "text": "hello"}'
 
-  curl "http://localhost:${PORT}/agents/my-agent?offset=-1&live=sse"
+  # Stream all existing events (connection closes after last event)
+  curl "http://localhost:${PORT}/agents/my-agent"
+
+  # Subscribe to live events (connection stays open)
+  curl "http://localhost:${PORT}/agents/my-agent?live=sse"
 `);
     }
   );

@@ -3,7 +3,8 @@
  *
  * Simple HTTP API for event streams:
  * - POST /agents/:path - Append event (auto-creates stream)
- * - GET /agents/:path - Read events (supports SSE with live=sse)
+ * - GET /agents/:path - Read events as SSE stream (closes after last event)
+ * - GET /agents/:path?live=sse - Read events as SSE stream (keeps connection open)
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -57,7 +58,7 @@ export function createApp(config: AppConfig): Hono {
   });
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // GET /agents/* - Read events
+  // GET /agents/* - Read events (always SSE)
   // ─────────────────────────────────────────────────────────────────────────────
 
   app.get("/agents/:path{.+}", async (c) => {
@@ -65,49 +66,61 @@ export function createApp(config: AppConfig): Hono {
     const offset = c.req.query("offset") ?? "-1";
     const live = c.req.query("live");
 
+    // Validate live parameter
+    if (live !== undefined && live !== "sse") {
+      return c.json(
+        {
+          error: "Invalid 'live' parameter",
+          message: `The 'live' query parameter must be either omitted or set to 'sse'. Got: '${live}'`,
+          validOptions: {
+            omitted: "Stream all existing events, then close connection",
+            sse: "Stream all existing events and keep connection open for live updates",
+          },
+        },
+        400
+      );
+    }
+
     // Ensure stream exists (auto-create)
     store.getOrCreate(agentPath);
 
-    // SSE mode
-    if (live === "sse") {
-      return streamSSE(c, async (stream) => {
-        let currentOffset = offset;
-        const TIMEOUT_MS = 30_000;
+    // Always return SSE stream
+    return streamSSE(c, async (stream) => {
+      let currentOffset = offset;
 
-        // Send all existing events first
-        const { events } = store.read(agentPath, currentOffset);
-        for (const event of events) {
-          await stream.writeSSE({
-            event: "data",
-            data: JSON.stringify(eventWithOffset(event)),
-          });
-          currentOffset = event.offset;
-        }
+      // Send all existing events first
+      const { events } = store.read(agentPath, currentOffset);
+      for (const event of events) {
+        await stream.writeSSE({
+          event: "data",
+          data: JSON.stringify(eventWithOffset(event)),
+        });
+        currentOffset = event.offset;
+      }
 
-        // Keep connection open for live updates
-        while (true) {
-          const hasNew = await store.waitForEvents(agentPath, currentOffset, TIMEOUT_MS);
-          
-          if (hasNew) {
-            const { events: newEvents } = store.read(agentPath, currentOffset);
-            for (const event of newEvents) {
-              await stream.writeSSE({
-                event: "data",
-                data: JSON.stringify(eventWithOffset(event)),
-              });
-              currentOffset = event.offset;
-            }
+      // If not live mode, close the stream after sending all events
+      if (live !== "sse") {
+        return;
+      }
+
+      // Keep connection open for live updates
+      const TIMEOUT_MS = 30_000;
+      while (true) {
+        const hasNew = await store.waitForEvents(agentPath, currentOffset, TIMEOUT_MS);
+
+        if (hasNew) {
+          const { events: newEvents } = store.read(agentPath, currentOffset);
+          for (const event of newEvents) {
+            await stream.writeSSE({
+              event: "data",
+              data: JSON.stringify(eventWithOffset(event)),
+            });
+            currentOffset = event.offset;
           }
-          // On timeout, just keep waiting (connection stays open)
         }
-      });
-    }
-
-    // Non-SSE: return JSON array
-    const { events } = store.read(agentPath, offset);
-    const eventsWithOffsets = events.map(eventWithOffset);
-    
-    return c.json(eventsWithOffsets);
+        // On timeout, just keep waiting (connection stays open)
+      }
+    });
   });
 
   return app;

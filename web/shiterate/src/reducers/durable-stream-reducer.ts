@@ -1,5 +1,5 @@
 /**
- * Simple Stream Reducer
+ * Durable Stream Reducer
  *
  * A React hook that consumes an SSE endpoint.
  * Events are expected to include an "offset" field.

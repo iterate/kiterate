@@ -8,7 +8,21 @@ import { Hono } from "hono";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp, EventStore } from "@kiterate/server-basic";
-import { PiSessionManager } from "./pi.js";
+import { PiAdapter } from "./pi.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global Error Handlers - Catch crashes before they kill the process
+// ─────────────────────────────────────────────────────────────────────────────
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[Server] UNHANDLED REJECTION:", reason);
+  console.error("[Server] Promise:", promise);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[Server] UNCAUGHT EXCEPTION:", error);
+  // Don't exit - let the server keep running if possible
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -18,7 +32,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const DATA_DIR = process.env.DATA_DIR ?? path.resolve(__dirname, "../.iterate/agents");
-const PI_SESSIONS_PATH = process.env.PI_SESSIONS_PATH ?? path.resolve(__dirname, "../.iterate/pi-sessions.yaml");
+const PI_SESSIONS_FILE = process.env.PI_SESSIONS_FILE ?? path.resolve(__dirname, "../.iterate/pi-sessions.yaml");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
@@ -27,15 +41,19 @@ const PI_SESSIONS_PATH = process.env.PI_SESSIONS_PATH ?? path.resolve(__dirname,
 async function main() {
   console.log(`[Server] Initializing with PI support...`);
   console.log(`[Server] Data directory: ${DATA_DIR}`);
-  console.log(`[Server] PI sessions file: ${PI_SESSIONS_PATH}`);
+  console.log(`[Server] PI sessions file: ${PI_SESSIONS_FILE}`);
 
   // Create store and basic app
   const store = new EventStore(DATA_DIR);
   const basicApp = createApp({ store });
 
-  // Create PI session manager
-  const piManager = new PiSessionManager(PI_SESSIONS_PATH, store);
-  console.log(`[Server] PI session manager initialized`);
+  // Create PI adapter - when PI emits events, append them to the store
+  const piAdapter = new PiAdapter((agentPath, event) => {
+    store.append(agentPath, event);
+  }, PI_SESSIONS_FILE);
+
+  // Load existing sessions
+  await piAdapter.loadSessions();
 
   // Create wrapper app with PI middleware
   const app = new Hono();
@@ -57,16 +75,19 @@ async function main() {
       body: JSON.stringify(body),
     });
 
-    // Let the basic app handle the POST
+    // Let the basic app handle the POST (stores the event)
     const response = await basicApp.fetch(newRequest);
-    
+
     // If successful, trigger PI adapter
     if (response.ok) {
       const agentPath = "/pi/" + c.req.param("path");
+      console.log(`[Server] Triggering PI adapter for ${agentPath}`);
       try {
-        await piManager.handleEvent(agentPath, body);
+        await piAdapter.handleEvent(agentPath, body);
+        console.log(`[Server] PI adapter completed for ${agentPath}`);
       } catch (err) {
-        console.error(`[Server] Failed to handle PI event:`, err);
+        console.error(`[Server] PI adapter error for ${agentPath}:`, err);
+        // Don't fail the response - the event was stored successfully
       }
     }
 
@@ -75,6 +96,13 @@ async function main() {
 
   // Forward all other requests to basic app
   app.all("*", (c) => basicApp.fetch(c.req.raw));
+
+  // Graceful shutdown
+  process.on("SIGTERM", () => {
+    console.log("[Server] Shutting down...");
+    piAdapter.closeAll();
+    process.exit(0);
+  });
 
   serve(
     {
@@ -92,16 +120,12 @@ Endpoints:
   GET  /agents/:path?live=sse     - Subscribe to events (SSE)
 
 PI Agent Streams:
-  POST /agents/pi/:name           - Events to /pi/* trigger PI adapter
+  POST /agents/pi/:name           - Events trigger PI adapter
 
-Examples:
-  curl -X POST http://localhost:${PORT}/agents/my-agent \\
-    -H "Content-Type: application/json" \\
-    -d '{"type": "message", "text": "hello"}'
-
+Example:
   curl -X POST http://localhost:${PORT}/agents/pi/my-session \\
     -H "Content-Type: application/json" \\
-    -d '{"type": "iterate:agent:action:send-user-message:called", "payload": {"content": "hello"}}'
+    -d '{"type": "user-message", "content": "hello"}'
 `);
     }
   );
