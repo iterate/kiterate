@@ -11,12 +11,11 @@ export {
   Offset,
   Payload,
   StreamStorageService,
-  DurableIterateStream,
   DurableStreamManager,
   InMemoryDurableStreamManager,
 } from "./DurableStreamManager.js";
 
-export type { StreamStorage } from "./DurableStreamManager.js";
+export type { DurableIterateStream, StreamStorage } from "./DurableStreamManager.js";
 
 // HTTP server
 export { AppLive, ServerLive } from "./server.js";
