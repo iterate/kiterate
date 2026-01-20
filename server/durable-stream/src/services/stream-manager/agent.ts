@@ -5,50 +5,48 @@
  * - Detect user messages and trigger LLM generation
  * - Append LLM response events to the stream
  */
-import { LanguageModel } from "@effect/ai";
 import { Effect, Layer, Option, Stream } from "effect";
 
-import { EventInput, EventType, type Offset, type StreamPath } from "../../domain.js";
+import { EventInput, type Offset, type StreamPath } from "../../domain.js";
+import { AiClient, AiModelType, PromptInput } from "../ai-client/index.js";
 import { StreamManager } from "./service.js";
+
+// -------------------------------------------------------------------------------------
+// Agent Layer
+// -------------------------------------------------------------------------------------
 
 const make = Effect.gen(function* () {
   const inner = yield* StreamManager;
-  const languageModel = yield* LanguageModel.LanguageModel;
+  const aiClient = yield* AiClient;
 
-  // -------------------------------------------------------------------------------------
-  // Helpers (closed over dependencies)
-  // -------------------------------------------------------------------------------------
+  // Per-path model selection: None = warmed up but not configured, Some = configured
+  const modelByPath = new Map<StreamPath, Option.Option<AiModelType>>();
 
-  /** Returns the prompt if generation should be triggered, None otherwise */
-  const getGenerationPrompt = (event: EventInput): Option.Option<string> => {
-    if (event.type === "iterate:agent:action:send-user-message:called") {
-      const content = event.payload["content"];
-      if (typeof content === "string") {
-        return Option.some(content);
-      }
+  /** Apply config change event to path state */
+  const applyConfig = (path: StreamPath, event: EventInput): boolean => {
+    const configChange = AiModelType.fromEventInput(event);
+    if (Option.isSome(configChange)) {
+      modelByPath.set(path, Option.some(configChange.value));
+      return true;
     }
-    return Option.none();
+    return false;
   };
 
-  /** Append response events from the LLM stream */
-  const appendLlmResponse = (path: StreamPath, prompt: string) => {
-    const responseStream = languageModel.streamText({ prompt });
-    return responseStream.pipe(
-      Stream.runForEach((part) =>
-        inner.append({
-          path,
-          event: EventInput.make({
-            type: EventType.make("iterate:llm:response:sse"),
-            payload: { ...part },
-          }),
-        }),
-      ),
-    );
-  };
-
-  // -------------------------------------------------------------------------------------
-  // Service methods
-  // -------------------------------------------------------------------------------------
+  /** Get model for path, warming up on first access. Returns None if not configured. */
+  const getModel = (path: StreamPath) =>
+    Effect.gen(function* () {
+      if (!modelByPath.has(path)) {
+        yield* Effect.log(`Warming up config for path: ${path}`);
+        yield* inner
+          .subscribe({ path, live: false })
+          .pipe(Stream.runForEach((event) => Effect.sync(() => applyConfig(path, event))));
+        if (!modelByPath.has(path)) {
+          modelByPath.set(path, Option.none());
+        }
+        yield* Effect.log(`Warmup complete for path: ${path}`);
+      }
+      return modelByPath.get(path)!;
+    });
 
   const subscribe = (input: { path: StreamPath; after?: Offset; live?: boolean }) =>
     inner.subscribe(input);
@@ -58,23 +56,29 @@ const make = Effect.gen(function* () {
       yield* Effect.log(`AgentManager.append: type=${input.event.type}`);
       yield* inner.append(input);
 
-      const prompt = getGenerationPrompt(input.event);
-      if (Option.isSome(prompt)) {
-        yield* Effect.log(`Triggering LLM generation for prompt: ${prompt.value.slice(0, 50)}...`);
-        yield* appendLlmResponse(input.path, prompt.value).pipe(
-          Effect.catchAll((error) => Effect.logError("LLM generation failed", error)),
-        );
+      if (applyConfig(input.path, input.event)) {
+        yield* Effect.log(`Switched AI model`);
+        return;
+      }
+
+      const promptInput = PromptInput.fromEventInput(input.event);
+      if (Option.isSome(promptInput)) {
+        const model = yield* getModel(input.path);
+        if (Option.isNone(model)) {
+          yield* Effect.log(`No AI model configured for path, skipping generation`);
+          return;
+        }
+        yield* Effect.log(`Triggering ${model.value} AI generation...`);
+        yield* aiClient
+          .prompt(model.value, input.path, promptInput.value)
+          .pipe(Stream.runForEach((event) => inner.append({ path: input.path, event })));
       }
     });
 
   return StreamManager.of({ subscribe, append });
 });
 
-export const agentLayer: Layer.Layer<
-  StreamManager,
-  never,
-  StreamManager | LanguageModel.LanguageModel
-> = Layer.effect(StreamManager, make);
+export const agentLayer = Layer.effect(StreamManager, make);
 
 // -------------------------------------------------------------------------------------
 // Test layer - no LLM, just logs and delegates
