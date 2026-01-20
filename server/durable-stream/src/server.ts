@@ -1,0 +1,71 @@
+import { createServer } from "node:http";
+
+import {
+  HttpRouter,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+  HttpMiddleware,
+} from "@effect/platform";
+import { NodeHttpServer } from "@effect/platform-node";
+import { Effect, Layer, Stream } from "effect";
+
+import { StreamManager, StreamPath, Event } from "./StreamManager.js";
+
+// GET /agents/* -> SSE stream
+const subscribeHandler = Effect.gen(function* () {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  const path = req.url.replace(/^\/agents\//, "").split("?")[0];
+  const streamPath = StreamPath.make(path);
+  const manager = yield* StreamManager;
+
+  // Send initial control event (upToDate since we have no history)
+  const controlEvent = `event: control\ndata: ${JSON.stringify({ upToDate: true })}\n\n`;
+
+  const sseStream = Stream.make(controlEvent).pipe(
+    Stream.concat(
+      manager
+        .subscribe({ streamPath })
+        .pipe(
+          Stream.map(
+            (event) => `event: data\ndata: ${JSON.stringify(event)}\n\n`,
+          ),
+        ),
+    ),
+    Stream.encodeText,
+  );
+
+  return HttpServerResponse.stream(sseStream, {
+    contentType: "text/event-stream",
+    headers: {
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
+});
+
+// POST /agents/* -> append event
+const appendHandler = Effect.gen(function* () {
+  const req = yield* HttpServerRequest.HttpServerRequest;
+  const path = req.url.replace(/^\/agents\//, "");
+  const streamPath = StreamPath.make(path);
+  const body = yield* req.json;
+  const event = Event.make(body as Record<string, unknown>);
+
+  const manager = yield* StreamManager;
+  yield* manager.append({ streamPath, event });
+
+  return HttpServerResponse.empty({ status: 204 });
+});
+
+// Router + serve layer (without Node HTTP - for testing)
+export const AppLive = HttpRouter.empty.pipe(
+  HttpRouter.get("/agents/*", subscribeHandler),
+  HttpRouter.post("/agents/*", appendHandler),
+  HttpServer.serve(HttpMiddleware.logger),
+  HttpServer.withLogAddress,
+);
+
+// Full server layer (with Node HTTP - for production)
+export const ServerLive = (port: number) =>
+  AppLive.pipe(Layer.provide(NodeHttpServer.layer(createServer, { port })));
