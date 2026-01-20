@@ -6,7 +6,13 @@
  */
 
 import { useReducer, useEffect, useRef, useState, useCallback } from "react";
-import { getCachedEvents, appendEvents, clearCache, type StoredEvent } from "@/lib/event-storage";
+import {
+  EVENT_STORAGE_ENABLED,
+  getCachedEvents,
+  appendEvents,
+  clearCache,
+  type StoredEvent,
+} from "@/lib/event-storage";
 import type { ConnectionStatus, StreamEvent } from "@/reducers";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,6 +91,7 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
   onCaughtUp,
   suspense = true,
 }: DurableStreamConfig<TState, TEvent>): DurableStreamResult<TState> {
+  const cacheEnabled = EVENT_STORAGE_ENABLED && Boolean(storageKey);
   const [state, dispatch] = useReducer(reducer, initialState);
   const [isStreaming, setIsStreaming] = useState(false);
   const [offset, setOffset] = useState("-1");
@@ -103,7 +110,7 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
 
   // Load cached events on mount
   useEffect(() => {
-    if (!storageKey) {
+    if (!cacheEnabled) {
       setCacheLoaded(true);
       return;
     }
@@ -201,7 +208,9 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
           dispatch(event);
 
           // Collect for caching (filtering happens in event-storage.ts)
-          eventsToCache.push(event as StoredEvent);
+          if (cacheEnabled) {
+            eventsToCache.push(event as StoredEvent);
+          }
 
           // Check for streaming events (LLM token streaming)
           const payload =
@@ -230,7 +239,7 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
         }
 
         // Batch cache new events (filtering happens inside appendEvents)
-        if (eventsToCache.length > 0 && storageKey) {
+        if (cacheEnabled && eventsToCache.length > 0) {
           appendEvents(storageKey, eventsToCache, offsetRef.current).catch((err) => {
             console.warn("[durable-stream] Failed to cache events:", err);
           });
@@ -259,7 +268,7 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
       eventSource?.close();
       setConnectionStatus({ state: "closed" });
     };
-  }, [url, storageKey, cacheLoaded]);
+  }, [url, storageKey, cacheLoaded, cacheEnabled]);
 
   // Throw for Suspense if enabled and not ready
   if (suspense && url && !isReady) {
@@ -274,11 +283,11 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
   }
 
   const reset = useCallback(async () => {
-    if (storageKey) {
+    if (cacheEnabled) {
       await clearCache(storageKey);
     }
     window.location.reload();
-  }, [storageKey]);
+  }, [storageKey, cacheEnabled]);
 
   return { state, isStreaming, reset, offset, connectionStatus };
 }

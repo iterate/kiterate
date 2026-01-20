@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/select.tsx";
 import { Button } from "@/components/ui/button.tsx";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip.tsx";
-import { clearCache } from "@/lib/event-storage";
+import { clearCache, EVENT_STORAGE_ENABLED } from "@/lib/event-storage";
 import type { ConnectionStatus } from "@/reducers";
 
 interface AppHeaderProps {
@@ -49,6 +49,7 @@ function ConnectionIndicator({ status }: { status: ConnectionStatus }) {
 
 export function AppHeader({ agentId, connectionStatus }: AppHeaderProps) {
   const { displayMode, setDisplayMode, rawEventsCount } = useRawMode();
+  const showCacheControls = EVENT_STORAGE_ENABLED;
 
   if (!agentId) {
     return null;
@@ -61,22 +62,24 @@ export function AppHeader({ agentId, connectionStatus }: AppHeaderProps) {
         {connectionStatus && <ConnectionIndicator status={connectionStatus} />}
       </div>
       <div className="flex items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              onClick={async () => {
-                await clearCache(`agent:${agentId}`);
-                window.location.reload();
-              }}
-            >
-              <Trash2Icon className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Clear local storage</TooltipContent>
-        </Tooltip>
+        {showCacheControls && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={async () => {
+                  await clearCache(`agent:${agentId}`);
+                  window.location.reload();
+                }}
+              >
+                <Trash2Icon className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Clear local storage</TooltipContent>
+          </Tooltip>
+        )}
         <Select value={displayMode} onValueChange={(value) => setDisplayMode(value as DisplayMode)}>
           <SelectTrigger className="h-8 w-auto min-w-[130px] text-xs">
             <SelectValue>

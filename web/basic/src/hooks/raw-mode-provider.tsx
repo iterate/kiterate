@@ -3,6 +3,7 @@ import { useState, useRef } from "react";
 import { DisplayModeContext, type DisplayMode } from "./use-raw-mode.ts";
 
 const STORAGE_KEY = "daemon:displayMode";
+const DISPLAY_MODE_STORAGE_ENABLED = false;
 
 function isValidDisplayMode(value: string | null): value is DisplayMode {
   return value === "pretty" || value === "raw-pretty" || value === "raw";
@@ -10,6 +11,9 @@ function isValidDisplayMode(value: string | null): value is DisplayMode {
 
 function getInitialDisplayMode(): DisplayMode {
   if (typeof window === "undefined") return "raw-pretty";
+  if (!DISPLAY_MODE_STORAGE_ENABLED) {
+    return "raw-pretty";
+  }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     // Handle legacy boolean values
@@ -32,6 +36,9 @@ export function RawModeProvider({ children }: { children: React.ReactNode }) {
 
   const setDisplayMode = (value: DisplayMode) => {
     setDisplayModeState(value);
+    if (!DISPLAY_MODE_STORAGE_ENABLED) {
+      return;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, value);
     } catch {
