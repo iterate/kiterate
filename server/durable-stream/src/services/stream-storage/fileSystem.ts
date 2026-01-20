@@ -1,18 +1,16 @@
 /**
  * File-system implementation of StreamStorage
  *
- * Stores events as newline-delimited JSON (NDJSON) files.
- * Each stream path maps to a file: {basePath}/{streamPath}.ndjson
+ * Stores events as YAML documents separated by `---`.
+ * Each stream path maps to a file: {basePath}/{streamPath}.yaml
  */
 import * as Fs from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
 import { DateTime, Effect, Layer, Schema, Stream } from "effect";
+import * as YAML from "yaml";
 
 import { Event, EventInput, Offset, StreamPath, Version } from "../../domain.js";
 import { StreamStorage, StreamStorageError, StreamStorageTypeId } from "./service.js";
-
-// JSON <-> Event schema: string encoded, Event type
-const JsonEvent = Schema.parseJson(Event);
 
 export const fileSystemLayer = (
   basePath: string,
@@ -27,7 +25,7 @@ export const fileSystemLayer = (
       yield* fs.makeDirectory(basePath, { recursive: true });
 
       const getFilePath = (streamPath: StreamPath) =>
-        path.join(basePath, `${streamPath.replace(/\//g, "_")}.ndjson`);
+        path.join(basePath, `${streamPath.replace(/\//g, "_")}.yaml`);
 
       const readOffsetFile = (streamPath: StreamPath) =>
         Effect.gen(function* () {
@@ -59,10 +57,11 @@ export const fileSystemLayer = (
             const version = input.version ?? Version.make("1");
             const event = Event.make({ ...input, offset, createdAt, version });
 
-            // Encode Event to JSON string
-            const encoded = yield* Schema.encode(JsonEvent)(event);
-            const line = encoded + "\n";
-            yield* fs.writeFile(filePath, new TextEncoder().encode(line), { flag: "a" });
+            // Encode Event to YAML document
+            const encoded = yield* Schema.encode(Event)(event);
+            const yaml = YAML.stringify(encoded);
+            const doc = "---\n" + yaml;
+            yield* fs.writeFile(filePath, new TextEncoder().encode(doc), { flag: "a" });
 
             // Update offset file
             yield* writeOffsetFile(streamPath, nextOffset + 1);
@@ -81,12 +80,10 @@ export const fileSystemLayer = (
               }
 
               const content = yield* fs.readFileString(filePath);
-              const lines = content.trim().split("\n").filter(Boolean);
+              const docs = YAML.parseAllDocuments(content).map((doc) => doc.toJS());
 
-              // Decode JSON strings to Events
-              const events = yield* Effect.all(
-                lines.map((line) => Schema.decodeUnknown(JsonEvent)(line)),
-              );
+              // Decode YAML objects to Events
+              const events = yield* Effect.all(docs.map((doc) => Schema.decodeUnknown(Event)(doc)));
 
               // after = last seen offset, so return events AFTER it (exclusive)
               const filtered =
