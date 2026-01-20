@@ -50,7 +50,7 @@ describe("Durable Stream Server", () => {
     "SSE subscriber receives posted event",
     Effect.gen(function* () {
       const fiber = yield* subscribe("/agents/chat/room1");
-      yield* Effect.sleep("50 millis");
+      yield* Effect.sleep("10 millis");
       yield* post("/agents/chat/room1", { type: "message", text: "Hello SSE!" });
 
       const chunks = yield* Fiber.join(fiber);
@@ -65,7 +65,7 @@ describe("Durable Stream Server", () => {
     Effect.gen(function* () {
       const sub1 = yield* subscribe("/agents/broadcast/chan");
       const sub2 = yield* subscribe("/agents/broadcast/chan");
-      yield* Effect.sleep("50 millis");
+      yield* Effect.sleep("10 millis");
       yield* post("/agents/broadcast/chan", { msg: "broadcast" });
 
       const [chunks1, chunks2] = yield* Effect.all([Fiber.join(sub1), Fiber.join(sub2)]);
@@ -79,7 +79,7 @@ describe("Durable Stream Server", () => {
     Effect.gen(function* () {
       const subA = yield* subscribe("/agents/path/a");
       const subB = yield* subscribe("/agents/path/b");
-      yield* Effect.sleep("50 millis");
+      yield* Effect.sleep("10 millis");
       yield* post("/agents/path/a", { source: "A" });
 
       const dataA = Chunk.toReadonlyArray(yield* Fiber.join(subA)).join("");
@@ -88,7 +88,7 @@ describe("Durable Stream Server", () => {
 
       const resultB = yield* Fiber.join(subB).pipe(
         Effect.timeoutTo({
-          duration: "100 millis",
+          duration: "50 millis",
           onSuccess: () => "received",
           onTimeout: () => "timeout",
         }),
