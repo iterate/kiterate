@@ -18,8 +18,11 @@ const make = Effect.gen(function* () {
 
   /** Returns the prompt if generation should be triggered, None otherwise */
   const getGenerationPrompt = (event: EventInput): Option.Option<string> => {
-    if (event.payload["role"] === "user" && event.payload["generate"] !== false) {
-      return Option.some(String(event.payload["content"] ?? ""));
+    if (event.type === "iterate:agent:action:send-user-message:called") {
+      const content = event.payload["content"];
+      if (typeof content === "string") {
+        return Option.some(content);
+      }
     }
     return Option.none();
   };
@@ -29,26 +32,12 @@ const make = Effect.gen(function* () {
     const responseStream = languageModel.streamText({ prompt });
     return responseStream.pipe(
       Stream.runForEach((part) =>
-        Effect.gen(function* () {
-          // Handle streaming part types
-          if (part.type === "text-delta") {
-            yield* streamManager.append({
-              path,
-              event: EventInput.make({
-                type: EventType.make("assistant.text"),
-                payload: { role: "assistant", type: "text", content: part.delta },
-              }),
-            });
-          } else if (part.type === "finish") {
-            yield* streamManager.append({
-              path,
-              event: EventInput.make({
-                type: EventType.make("assistant.finish"),
-                payload: { role: "assistant", type: "finish", reason: part.reason },
-              }),
-            });
-          }
-          // Ignore other streaming part types (text-start, text-end, reasoning-*, etc.)
+        streamManager.append({
+          path,
+          event: EventInput.make({
+            type: EventType.make("iterate:llm:response:sse"),
+            payload: { ...part },
+          }),
         }),
       ),
     );

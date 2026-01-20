@@ -59,60 +59,61 @@ describe("AgentManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("append without generate flag does not trigger LLM", () =>
+  it.effect("append with non-trigger event type does not trigger LLM", () =>
     Effect.gen(function* () {
       const agent = yield* AgentManager;
       const path = StreamPath.make("test/no-generate");
 
-      // Append with generate: false
+      // Append with a type that doesn't trigger generation
       yield* agent.append({
         path,
         event: EventInput.make({
-          type: EventType.make("user"),
-          payload: { role: "user", content: "hi", generate: false },
+          type: EventType.make("iterate:agent:state:updated"),
+          payload: { content: "hi" },
         }),
       });
 
       const events = yield* agent.subscribe({ path }).pipe(Stream.runCollect);
       const arr = Chunk.toReadonlyArray(events);
 
-      // Should only have the user message, no assistant response
+      // Should only have the original event, no assistant response
       expect(arr.length).toBe(1);
-      expect(arr[0].payload["role"]).toBe("user");
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("append with role=user triggers LLM generation", () =>
+  it.effect("send-user-message event triggers LLM generation", () =>
     Effect.gen(function* () {
       const agent = yield* AgentManager;
       const path = StreamPath.make("test/generate");
 
-      // Append user message (default behavior should trigger LLM)
+      // Append user message with the trigger event type
       yield* agent.append({
         path,
         event: EventInput.make({
-          type: EventType.make("user"),
-          payload: { role: "user", content: "say hello" },
+          type: EventType.make("iterate:agent:action:send-user-message:called"),
+          payload: { content: "say hello" },
         }),
       });
 
       const events = yield* agent.subscribe({ path }).pipe(Stream.runCollect);
       const arr = Chunk.toReadonlyArray(events);
 
-      // Should have: user message + text events + finish
+      // Should have: user message + SSE response events
       expect(arr.length).toBeGreaterThan(1);
 
       // First event is user message
-      expect(arr[0].payload["role"]).toBe("user");
+      expect(arr[0].type).toBe("iterate:agent:action:send-user-message:called");
 
-      // Should have assistant events
-      const assistantEvents = arr.filter((e) => e.payload["role"] === "assistant");
-      expect(assistantEvents.length).toBeGreaterThan(0);
+      // Remaining events are SSE parts
+      const sseEvents = arr.filter((e) => e.type === "iterate:llm:response:sse");
+      expect(sseEvents.length).toBeGreaterThan(0);
 
-      // Should have a finish event
-      const finishEvent = assistantEvents.find((e) => e.payload["type"] === "finish");
-      expect(finishEvent).toBeDefined();
-      expect(finishEvent?.payload["reason"]).toBe("stop");
+      // Should have text-delta and finish parts
+      const textDelta = sseEvents.find((e) => e.payload["type"] === "text-delta");
+      const finish = sseEvents.find((e) => e.payload["type"] === "finish");
+      expect(textDelta).toBeDefined();
+      expect(finish).toBeDefined();
+      expect(finish?.payload["reason"]).toBe("stop");
     }).pipe(Effect.provide(testLayer)),
   );
 });
