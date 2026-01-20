@@ -1,12 +1,10 @@
 import { HttpClient, HttpClientRequest } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
-import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
+import { Chunk, Effect, Layer, Stream } from "effect";
 
 import { AppLive } from "./server.js";
 import { InMemoryStreamManager } from "./StreamManager.js";
-
-// In => Out
 
 const TestLayer = Layer.merge(
   AppLive.pipe(
@@ -17,8 +15,9 @@ const TestLayer = Layer.merge(
 );
 
 const test = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
-  it.live(name, () =>
-    effect.pipe(Effect.timeout("500 millis"), Effect.provide(TestLayer), Effect.scoped),
+  it.scopedLive(name, () =>
+    //
+    effect.pipe(Effect.timeout("500 millis"), Effect.provide(TestLayer)),
   );
 
 // Raw HTTP SSE requires fork pattern - Stream.toQueue doesn't work with raw HTTP streams
@@ -58,7 +57,7 @@ describe("Durable Stream Server", () => {
       yield* Effect.sleep("10 millis");
       yield* post("/agents/chat/room1", { type: "message", text: "Hello SSE!" });
 
-      const chunks = yield* Fiber.join(fiber);
+      const chunks = yield* fiber;
       const data = Chunk.toReadonlyArray(chunks).join("");
       expect(data).toContain("data:");
       expect(data).toContain("Hello SSE!");
@@ -73,7 +72,8 @@ describe("Durable Stream Server", () => {
       yield* Effect.sleep("10 millis");
       yield* post("/agents/broadcast/chan", { msg: "broadcast" });
 
-      const [chunks1, chunks2] = yield* Effect.all([Fiber.join(sub1), Fiber.join(sub2)]);
+      const chunks1 = yield* sub1;
+      const chunks2 = yield* sub2;
       expect(Chunk.toReadonlyArray(chunks1).join("")).toContain("broadcast");
       expect(Chunk.toReadonlyArray(chunks2).join("")).toContain("broadcast");
     }),
@@ -87,11 +87,11 @@ describe("Durable Stream Server", () => {
       yield* Effect.sleep("10 millis");
       yield* post("/agents/path/a", { source: "A" });
 
-      const dataA = Chunk.toReadonlyArray(yield* Fiber.join(subA)).join("");
+      const dataA = Chunk.toReadonlyArray(yield* subA).join("");
       expect(dataA).toContain("source");
       expect(dataA).toContain("A");
 
-      const resultB = yield* Fiber.join(subB).pipe(
+      const resultB = yield* subB.pipe(
         Effect.timeoutTo({
           duration: "50 millis",
           onSuccess: () => "received",

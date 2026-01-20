@@ -49,9 +49,7 @@ export const IterateStream = {
         append: (event) => PubSub.publish(pubsub, event).pipe(Effect.asVoid),
         subscribe: () =>
           Stream.unwrapScoped(
-            Effect.map(PubSub.subscribe(pubsub), (queue) =>
-              Stream.fromQueue(queue),
-            ),
+            Effect.map(PubSub.subscribe(pubsub), (queue) => Stream.fromQueue(queue)),
           ),
       };
     }),
@@ -61,78 +59,71 @@ export const IterateStream = {
 // IterateStreamFactory - service for creating IterateStreams
 // -------------------------------------------------------------------------------------
 
-export class IterateStreamFactory extends Context.Tag(
-  "@app/IterateStreamFactory",
-)<
+export class IterateStreamFactory extends Context.Tag("@app/IterateStreamFactory")<
   IterateStreamFactory,
   {
     readonly make: () => Effect.Effect<IterateStream>;
   }
 >() {}
 
-export const InMemoryIterateStreamFactory: Layer.Layer<IterateStreamFactory> =
-  Layer.succeed(IterateStreamFactory, {
+export const InMemoryIterateStreamFactory: Layer.Layer<IterateStreamFactory> = Layer.succeed(
+  IterateStreamFactory,
+  {
     make: () => IterateStream.makeInMemory(),
-  });
+  },
+);
 
 export class StreamManager extends Context.Tag("@app/StreamManager")<
   StreamManager,
   {
-    readonly append: (input: {
-      streamPath: StreamPath;
-      event: Event;
-    }) => Effect.Effect<void>;
-    readonly subscribe: (input: {
-      streamPath: StreamPath;
-    }) => Stream.Stream<Event>;
+    readonly append: (input: { streamPath: StreamPath; event: Event }) => Effect.Effect<void>;
+    readonly subscribe: (input: { streamPath: StreamPath }) => Stream.Stream<Event>;
   }
 >() {}
 
-export const StreamManagerLive: Layer.Layer<
-  StreamManager,
-  never,
-  IterateStreamFactory
-> = Layer.effect(
-  StreamManager,
-  Effect.gen(function* () {
-    const factory = yield* IterateStreamFactory;
-    const streams = new Map<StreamPath, IterateStream>();
+export const StreamManagerLive: Layer.Layer<StreamManager, never, IterateStreamFactory> =
+  Layer.effect(
+    StreamManager,
+    Effect.gen(function* () {
+      const factory = yield* IterateStreamFactory;
+      const streams = new Map<StreamPath, IterateStream>();
 
-    const getOrCreateStream = Effect.fn(function* (streamPath: StreamPath) {
-      const existing = streams.get(streamPath);
-      if (existing) {
-        return existing;
-      }
-      const stream = yield* factory.make();
-      streams.set(streamPath, stream);
-      return stream;
-    });
+      const getOrCreateStream = Effect.fn(function* (streamPath: StreamPath) {
+        const existing = streams.get(streamPath);
+        if (existing) {
+          return existing;
+        }
+        const stream = yield* factory.make();
+        streams.set(streamPath, stream);
+        return stream;
+      });
 
-    const append = Effect.fn("StreamManager.append")(function* ({
-      streamPath,
-      event,
-    }: {
-      streamPath: StreamPath;
-      event: Event;
-    }) {
-      const stream = yield* getOrCreateStream(streamPath);
-      yield* stream.append(event);
-    });
+      const append = Effect.fn("StreamManager.append")(function* ({
+        streamPath,
+        event,
+      }: {
+        streamPath: StreamPath;
+        event: Event;
+      }) {
+        const stream = yield* getOrCreateStream(streamPath);
+        yield* stream.append(event);
+      });
 
-    const subscribe = ({ streamPath }: { streamPath: StreamPath }) =>
-      Stream.unwrap(
-        Effect.gen(function* () {
-          const stream = yield* getOrCreateStream(streamPath);
-          return stream.subscribe();
-        }).pipe(Effect.withSpan("StreamManager.subscribe")),
-      );
+      const subscribe = ({ streamPath }: { streamPath: StreamPath }) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const stream = yield* getOrCreateStream(streamPath);
+            return stream.subscribe();
+          }).pipe(Effect.withSpan("StreamManager.subscribe")),
+        );
 
-    return { append, subscribe };
-  }),
+      return { append, subscribe };
+    }),
+  );
+
+export const InMemoryStreamManager: Layer.Layer<StreamManager> = StreamManagerLive.pipe(
+  Layer.provide(InMemoryIterateStreamFactory),
 );
-
-export const InMemoryStreamManager: Layer.Layer<StreamManager> =
-  StreamManagerLive.pipe(Layer.provide(InMemoryIterateStreamFactory));
 
 // In-source tests
 if (import.meta.vitest) {
@@ -181,10 +172,7 @@ if (import.meta.vitest) {
         yield* manager.append({ streamPath: pathA, event: eventA });
         yield* manager.append({ streamPath: pathB, event: eventB });
 
-        const [eventsA, eventsB] = yield* Effect.all([
-          subscriberA,
-          subscriberB,
-        ]);
+        const [eventsA, eventsB] = yield* Effect.all([subscriberA, subscriberB]);
 
         expect(Chunk.toReadonlyArray(eventsA)).toEqual([eventA]);
         expect(Chunk.toReadonlyArray(eventsB)).toEqual([eventB]);
@@ -210,10 +198,7 @@ if (import.meta.vitest) {
         const event = Event.make({ message: "broadcast" });
         yield* manager.append({ streamPath: path, event });
 
-        const [events1, events2] = yield* Effect.all([
-          subscriber1,
-          subscriber2,
-        ]);
+        const [events1, events2] = yield* Effect.all([subscriber1, subscriber2]);
 
         expect(Chunk.toReadonlyArray(events1)).toEqual([event]);
         expect(Chunk.toReadonlyArray(events2)).toEqual([event]);

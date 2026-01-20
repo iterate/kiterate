@@ -40,10 +40,7 @@ export const make = (config: StreamClientConfig) =>
             HttpClientRequest.get(`${config.baseUrl}/agents/${path}`),
           );
 
-          return response.stream.pipe(
-            Stream.decodeText(),
-            Stream.mapConcat(parseSSE),
-          );
+          return response.stream.pipe(Stream.decodeText(), Stream.mapConcat(parseSSE));
         }).pipe(Effect.mapError((e) => new Error(`Subscribe failed: ${e}`))),
       );
 
@@ -62,7 +59,9 @@ export const make = (config: StreamClientConfig) =>
     return { subscribe, append };
   });
 
-export const layer = (config: StreamClientConfig): Layer.Layer<StreamClient, never, HttpClient.HttpClient> =>
+export const layer = (
+  config: StreamClientConfig,
+): Layer.Layer<StreamClient, never, HttpClient.HttpClient> =>
   Layer.effect(StreamClient, make(config));
 
 // -------------------------------------------------------------------------------------
