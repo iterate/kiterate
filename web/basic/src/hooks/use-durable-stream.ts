@@ -157,6 +157,7 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
   }, [storageKey]);
 
   // Two-phase connection: catchup first (non-live), then live
+  // With automatic reconnection on failure
   useEffect(() => {
     if (!url || !cacheLoaded) {
       if (!url) {
@@ -169,10 +170,17 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
     let cancelled = false;
     let eventSource: EventSource | null = null;
     let isLive = false; // Track when we're truly live
+    let reconnectAttempt = 0;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    setConnectionStatus({ state: "connecting" });
+    const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
+    const BASE_DELAY = 1000; // 1 second base
 
-    const startOffset = offsetRef.current;
+    const getReconnectDelay = () => {
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped)
+      const delay = Math.min(BASE_DELAY * Math.pow(2, reconnectAttempt), MAX_RECONNECT_DELAY);
+      return delay + Math.random() * 1000; // Add jitter
+    };
 
     // Helper to process events
     const processEvents = (events: TEvent[], isLivePhase: boolean) => {
@@ -231,90 +239,147 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
       }
     };
 
-    // Phase 1: Catchup (non-live) - fetch history only
-    const catchupUrl = new URL(url, window.location.origin);
-    catchupUrl.searchParams.set("offset", startOffset);
-    // No live param = history only
+    // Schedule a reconnection attempt
+    const scheduleReconnect = () => {
+      if (cancelled || reconnectTimeout) return;
 
-    console.log(`[durable-stream] Phase 1: Catchup from offset ${startOffset}`);
+      const delay = getReconnectDelay();
+      console.log(
+        `[durable-stream] Scheduling reconnect in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempt + 1})`,
+      );
+      setConnectionStatus({ state: "connecting" });
 
-    fetch(catchupUrl.toString())
-      .then(async (res) => {
-        if (cancelled) return;
-        if (!res.ok) throw new Error(`Catchup failed: ${res.status}`);
-
-        // Parse SSE response (server returns SSE format even for non-live)
-        const text = await res.text();
-        const events: TEvent[] = [];
-        // SSE format: "event: data\ndata: {...json...}\n\n"
-        for (const block of text.split("\n\n")) {
-          const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
-          if (dataLine) {
-            const json = dataLine.slice(6); // Remove "data: " prefix
-            events.push(JSON.parse(json));
-          }
+      reconnectTimeout = setTimeout(() => {
+        reconnectTimeout = null;
+        if (!cancelled) {
+          reconnectAttempt++;
+          connect();
         }
+      }, delay);
+    };
 
-        if (events.length > 0) {
-          console.log(`[durable-stream] Catchup: ${events.length} events`);
-          processEvents(events, false); // Not live
-        }
+    // Main connection function (can be called for initial connect and reconnects)
+    const connect = () => {
+      if (cancelled) return;
 
-        if (cancelled) return;
+      // Close any existing connection
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      isLive = false;
 
-        // Phase 2: Live connection
-        const liveOffset = offsetRef.current;
-        console.log(`[durable-stream] Phase 2: Live from offset ${liveOffset}`);
+      setConnectionStatus({ state: "connecting" });
 
-        const liveUrl = new URL(url, window.location.origin);
-        liveUrl.searchParams.set("offset", liveOffset);
-        liveUrl.searchParams.set("live", "sse");
+      const startOffset = offsetRef.current;
 
-        eventSource = new EventSource(liveUrl.toString());
-        isLive = true;
+      // Phase 1: Catchup (non-live) - fetch history only
+      const catchupUrl = new URL(url, window.location.origin);
+      catchupUrl.searchParams.set("offset", startOffset);
+      // No live param = history only
 
-        eventSource.onopen = () => {
-          if (!cancelled) {
-            setConnectionStatus({ state: "connected" });
-            setIsReady(true);
-            onCaughtUpRef.current?.();
-          }
-        };
+      console.log(`[durable-stream] Phase 1: Catchup from offset ${startOffset}`);
 
-        eventSource.addEventListener("data", (evt) => {
+      fetch(catchupUrl.toString())
+        .then(async (res) => {
           if (cancelled) return;
-          try {
-            const data = JSON.parse((evt as MessageEvent).data);
-            const events: TEvent[] = Array.isArray(data) ? data : [data];
-            processEvents(events, isLive);
-          } catch (e) {
-            console.error("[durable-stream] Parse error:", e);
-          }
-        });
+          if (!res.ok) throw new Error(`Catchup failed: ${res.status}`);
 
-        eventSource.onerror = (err) => {
-          console.error("[durable-stream] SSE error:", err);
-          if (!cancelled) {
-            const es = eventSource;
-            if (es?.readyState === EventSource.CLOSED) {
-              setConnectionStatus({ state: "error", message: "Connection closed" });
-            } else if (es?.readyState === EventSource.CONNECTING) {
-              setConnectionStatus({ state: "connecting" });
-            } else {
-              setConnectionStatus({ state: "error", message: "Connection error" });
+          // Reset reconnect counter on successful catchup
+          reconnectAttempt = 0;
+
+          // Parse SSE response (server returns SSE format even for non-live)
+          const text = await res.text();
+          const events: TEvent[] = [];
+          // SSE format: "event: data\ndata: {...json...}\n\n"
+          for (const block of text.split("\n\n")) {
+            const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
+            if (dataLine) {
+              const json = dataLine.slice(6); // Remove "data: " prefix
+              events.push(JSON.parse(json));
             }
           }
-        };
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("[durable-stream] Catchup error:", err);
-        setConnectionStatus({ state: "error", message: err.message });
-        setIsReady(true);
-      });
+
+          if (events.length > 0) {
+            console.log(`[durable-stream] Catchup: ${events.length} events`);
+            processEvents(events, false); // Not live
+          }
+
+          if (cancelled) return;
+
+          // Phase 2: Live connection
+          const liveOffset = offsetRef.current;
+          console.log(`[durable-stream] Phase 2: Live from offset ${liveOffset}`);
+
+          const liveUrl = new URL(url, window.location.origin);
+          liveUrl.searchParams.set("offset", liveOffset);
+          liveUrl.searchParams.set("live", "sse");
+
+          eventSource = new EventSource(liveUrl.toString());
+          isLive = true;
+
+          eventSource.onopen = () => {
+            if (!cancelled) {
+              reconnectAttempt = 0; // Reset on successful connection
+              setConnectionStatus({ state: "connected" });
+              setIsReady(true);
+              onCaughtUpRef.current?.();
+            }
+          };
+
+          eventSource.addEventListener("data", (evt) => {
+            if (cancelled) return;
+            try {
+              const data = JSON.parse((evt as MessageEvent).data);
+              const events: TEvent[] = Array.isArray(data) ? data : [data];
+              processEvents(events, isLive);
+            } catch (e) {
+              console.error("[durable-stream] Parse error:", e);
+            }
+          });
+
+          eventSource.onerror = () => {
+            if (cancelled) return;
+
+            const es = eventSource;
+            if (es?.readyState === EventSource.CLOSED) {
+              // Connection was closed - attempt reconnect
+              console.log("[durable-stream] SSE connection closed, will reconnect");
+              eventSource?.close();
+              eventSource = null;
+              isLive = false;
+              scheduleReconnect();
+            } else if (es?.readyState === EventSource.CONNECTING) {
+              // Browser is auto-reconnecting
+              setConnectionStatus({ state: "connecting" });
+            } else {
+              // Other error - close and reconnect manually
+              console.log("[durable-stream] SSE error, will reconnect");
+              eventSource?.close();
+              eventSource = null;
+              isLive = false;
+              scheduleReconnect();
+            }
+          };
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          console.error("[durable-stream] Catchup error:", err);
+          setConnectionStatus({ state: "error", message: err.message });
+          setIsReady(true); // Allow UI to render even on error
+          scheduleReconnect(); // Try to reconnect
+        });
+    };
+
+    // Start initial connection
+    connect();
 
     return () => {
       cancelled = true;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+        reconnectTimeout = null;
+      }
       eventSource?.close();
       setConnectionStatus({ state: "closed" });
     };

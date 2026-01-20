@@ -200,7 +200,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   );
 
   const {
-    state: { feed, isStreaming: stateIsStreaming, streamingMessage, rawEvents },
+    state: { feed, isStreaming: stateIsStreaming, streamingMessage, rawEvents, configuredModel },
     isStreaming: hookIsStreaming,
     connectionStatus,
   } = useDurableStream<WrapperState, { type: string; [key: string]: unknown }>({
@@ -211,6 +211,13 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     suspense: false,
     onLiveEvent: handleLiveEvent,
   });
+
+  // Sync AI model selector with configured model from stream history
+  useEffect(() => {
+    if (configuredModel) {
+      setAiModel(configuredModel);
+    }
+  }, [configuredModel]);
 
   const isStreaming = stateIsStreaming || hookIsStreaming;
   const isDisabled = sending;

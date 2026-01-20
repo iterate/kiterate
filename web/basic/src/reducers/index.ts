@@ -77,6 +77,9 @@ export type FeedItem = InnerFeedItem | EventFeedItem | ErrorFeedItem | GroupedEv
 // Wrapper State (includes rawEvents and handles envelope)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** AI model type for config tracking */
+export type AiModelType = "openai" | "grok";
+
 export interface WrapperState {
   feed: FeedItem[];
   isStreaming: boolean;
@@ -92,6 +95,8 @@ export interface WrapperState {
   /** Grok voice state */
   grokStreamingTranscript: string;
   grokAudioChunks: string[];
+  /** Currently configured AI model (from config events) */
+  configuredModel?: AiModelType | undefined;
 }
 
 export function createInitialWrapperState(): WrapperState {
@@ -118,6 +123,7 @@ const CLAUDE_EVENT = "iterate:agent:harness:claude:event-received";
 const OPENCODE_EVENT = "iterate:agent:harness:opencode:event-received";
 const OPENAI_EVENT = "iterate:openai:response:sse";
 const GROK_EVENT = "iterate:grok:response:sse";
+const CONFIG_EVENT = "iterate:agent:config:set";
 const USER_MSG = "iterate:agent:action:send-user-message:called";
 const AGENT_ERROR = "iterate:agent:error";
 
@@ -305,6 +311,15 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
       grokStreamingTranscript: innerState.streamingTranscript,
       grokAudioChunks: innerState.audioChunks,
     });
+  }
+
+  // Config event - track the configured AI model
+  if (type === CONFIG_EVENT) {
+    const model = (e.payload as { model?: string })?.model;
+    if (model === "openai" || model === "grok") {
+      return { ...state, feed: [...state.feed, evtItem], rawEvents, configuredModel: model };
+    }
+    return { ...state, feed: [...state.feed, evtItem], rawEvents };
   }
 
   // User message action → create both EventFeedItem (for raw display) and MessageFeedItem
