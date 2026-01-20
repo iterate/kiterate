@@ -66,6 +66,7 @@ module.exports = defineConfig([
       "no-redeclare": "off",
       "no-undef": "off",
       "no-param-reassign": "off",
+      "require-yield": "off",
 
       "@typescript-eslint/no-unused-vars": [
         "warn",
