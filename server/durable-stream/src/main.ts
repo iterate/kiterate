@@ -3,7 +3,6 @@ import { NodeContext, NodeHttpClient, NodeRuntime } from "@effect/platform-node"
 import { Config, Layer } from "effect";
 
 import { ServerLive } from "./server.js";
-import * as AgentManager from "./services/agent-manager/index.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
 
@@ -21,11 +20,13 @@ const StreamStorageLive = StreamStorage.fileSystemLayer(".data/streams").pipe(
   Layer.provide(NodeContext.layer),
 );
 
-const MainLive = ServerLive(port).pipe(
-  Layer.provide(AgentManager.liveLayer),
+// StreamManager with agent layer (LLM integration) on top of live layer
+const StreamManagerLive = StreamManager.agentLayer.pipe(
   Layer.provide(StreamManager.liveLayer),
   Layer.provide(StreamStorageLive),
   Layer.provide(LanguageModelLive),
 );
+
+const MainLive = ServerLive(port).pipe(Layer.provide(StreamManagerLive));
 
 NodeRuntime.runMain(Layer.launch(MainLive));

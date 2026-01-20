@@ -1,15 +1,18 @@
 /**
- * AgentManager live layer - uses @effect/ai for LLM integration
+ * Agent layer for StreamManager - adds LLM integration
+ *
+ * Wraps an underlying StreamManager to:
+ * - Detect user messages and trigger LLM generation
+ * - Append LLM response events to the stream
  */
 import { LanguageModel } from "@effect/ai";
 import { Effect, Layer, Option, Stream } from "effect";
 
 import { EventInput, EventType, type Offset, type StreamPath } from "../../domain.js";
-import { StreamManager } from "../stream-manager/service.js";
-import { AgentManager, AgentManagerError } from "./service.js";
+import { StreamManager } from "./service.js";
 
 const make = Effect.gen(function* () {
-  const streamManager = yield* StreamManager;
+  const inner = yield* StreamManager;
   const languageModel = yield* LanguageModel.LanguageModel;
 
   // -------------------------------------------------------------------------------------
@@ -32,7 +35,7 @@ const make = Effect.gen(function* () {
     const responseStream = languageModel.streamText({ prompt });
     return responseStream.pipe(
       Stream.runForEach((part) =>
-        streamManager.append({
+        inner.append({
           path,
           event: EventInput.make({
             type: EventType.make("iterate:llm:response:sse"),
@@ -48,50 +51,52 @@ const make = Effect.gen(function* () {
   // -------------------------------------------------------------------------------------
 
   const subscribe = (input: { path: StreamPath; after?: Offset; live?: boolean }) =>
-    streamManager.subscribe(input);
+    inner.subscribe(input);
 
   const append = (input: { path: StreamPath; event: EventInput }) =>
     Effect.gen(function* () {
       yield* Effect.log(`AgentManager.append: type=${input.event.type}`);
-      yield* streamManager.append(input);
+      yield* inner.append(input);
 
       const prompt = getGenerationPrompt(input.event);
       if (Option.isSome(prompt)) {
         yield* Effect.log(`Triggering LLM generation for prompt: ${prompt.value.slice(0, 50)}...`);
-        yield* appendLlmResponse(input.path, prompt.value);
+        yield* appendLlmResponse(input.path, prompt.value).pipe(
+          Effect.catchAll((error) => Effect.logError("LLM generation failed", error)),
+        );
       }
-    }).pipe(Effect.mapError((cause) => AgentManagerError.make({ operation: "append", cause })));
+    });
 
-  return AgentManager.of({ subscribe, append });
+  return StreamManager.of({ subscribe, append });
 });
 
-export const liveLayer: Layer.Layer<
-  AgentManager,
+export const agentLayer: Layer.Layer<
+  StreamManager,
   never,
   StreamManager | LanguageModel.LanguageModel
-> = Layer.effect(AgentManager, make);
+> = Layer.effect(StreamManager, make);
 
 // -------------------------------------------------------------------------------------
-// Test layer - no LLM, just delegates to StreamManager
+// Test layer - no LLM, just logs and delegates
 // -------------------------------------------------------------------------------------
 
 const makeTest = Effect.gen(function* () {
-  const streamManager = yield* StreamManager;
+  const inner = yield* StreamManager;
 
   const subscribe = (input: { path: StreamPath; after?: Offset; live?: boolean }) =>
-    streamManager.subscribe(input);
+    inner.subscribe(input);
 
   const append = (input: { path: StreamPath; event: EventInput }) =>
     Effect.gen(function* () {
       yield* Effect.log(`AgentManager(test).append: type=${input.event.type} [LLM disabled]`);
-      yield* streamManager.append(input);
-    }).pipe(Effect.mapError((cause) => AgentManagerError.make({ operation: "append", cause })));
+      yield* inner.append(input);
+    });
 
-  return AgentManager.of({ subscribe, append });
+  return StreamManager.of({ subscribe, append });
 });
 
-/** Test layer - no LLM integration, just delegates to StreamManager */
-export const testLayer: Layer.Layer<AgentManager, never, StreamManager> = Layer.effect(
-  AgentManager,
+/** Test layer - no LLM integration, just logs and delegates */
+export const testLayer: Layer.Layer<StreamManager, never, StreamManager> = Layer.effect(
+  StreamManager,
   makeTest,
 );

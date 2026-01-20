@@ -8,5 +8,6 @@ export { StreamManager } from "./service.js";
 // Re-export IterateStream namespace
 export * as IterateStream from "./iterateStream.js";
 
-// Re-export layer
+// Re-export layers
 export { liveLayer } from "./live.js";
+export { agentLayer, testLayer as agentTestLayer } from "./agent.js";

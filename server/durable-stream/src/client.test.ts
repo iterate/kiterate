@@ -7,7 +7,6 @@ import { Effect, Layer, Scope } from "effect";
 
 import { EventInput, EventType, StreamPath } from "./domain.js";
 import { AppLive } from "./server.js";
-import * as AgentManager from "./services/agent-manager/index.js";
 import * as StreamClient from "./services/stream-client/index.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
@@ -15,7 +14,7 @@ import { subscribeClient } from "./testing.js";
 
 const testLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(AgentManager.testLayer),
+    Layer.provide(StreamManager.agentTestLayer),
     Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),
