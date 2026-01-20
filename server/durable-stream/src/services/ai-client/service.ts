@@ -101,15 +101,17 @@ const makeGrokClient = Effect.gen(function* () {
     });
 
   return {
-    prompt: (path: StreamPath, input: PromptInput): Stream.Stream<EventInput, never> => {
-      if (input._tag === "AudioPrompt") {
-        return Stream.empty;
-      }
-
-      return Stream.unwrap(
+    prompt: (path: StreamPath, input: PromptInput): Stream.Stream<EventInput, never> =>
+      Stream.unwrap(
         Effect.gen(function* () {
           const connection = yield* getConnection(path);
-          yield* connection.sendText(input.content);
+
+          if (input._tag === "AudioPrompt") {
+            yield* connection.send(Buffer.from(input.data));
+          } else {
+            yield* connection.sendText(input.content);
+          }
+
           return connection.events.pipe(
             Stream.map((event) =>
               EventInput.make({
@@ -123,8 +125,7 @@ const makeGrokClient = Effect.gen(function* () {
             Effect.as(Effect.logError("Grok connection failed", error), Stream.empty),
           ),
         ),
-      );
-    },
+      ),
   };
 });
 
