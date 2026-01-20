@@ -10,18 +10,28 @@ import {
 import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer, Schema, Stream } from "effect";
 
-import { EventInput, StreamPath } from "./domain.js";
+import { EventInput, Offset, StreamPath } from "./domain.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as Sse from "./Sse.js";
 
 // GET /agents/* -> SSE stream
 const subscribeHandler = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
-  const rawPath = req.url.replace(/^\/agents\//, "").split("?")[0];
+  const url = new URL(req.url, "http://localhost");
+  const rawPath = url.pathname.replace(/^\/agents\//, "");
   const path = StreamPath.make(rawPath);
-  const manager = yield* StreamManager.StreamManager;
 
-  const stream = manager.subscribe({ path, live: true }).pipe(Stream.map(Sse.data));
+  // Parse query params
+  const offsetParam = url.searchParams.get("offset");
+  const liveParam = url.searchParams.get("live");
+
+  const from = offsetParam ? Offset.make(offsetParam) : undefined;
+  const live = liveParam === "sse" || liveParam === "true";
+
+  const manager = yield* StreamManager.StreamManager;
+  const stream = manager
+    .subscribe({ path, ...(from && { from }), live })
+    .pipe(Stream.map(Sse.data));
 
   return Sse.response(stream);
 });
@@ -39,6 +49,7 @@ const appendHandler = Effect.gen(function* () {
 
   return HttpServerResponse.empty({ status: 204 });
 }).pipe(
+  Effect.tapError((error) => Effect.logError("Request failed", error)),
   Effect.catchTag("ParseError", (error) =>
     HttpServerResponse.json({ error: error.message }, { status: 400 }),
   ),

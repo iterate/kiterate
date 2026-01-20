@@ -18,6 +18,11 @@ export class StreamManager extends Context.Tag("@app/StreamManager")<
       event: EventInput;
     }) => Effect.Effect<void, StreamStorageError>;
 
+    /**
+     * Subscribe to events on a stream.
+     * @param from - Last seen offset (exclusive). Returns events with offset > from.
+     * @param live - If true, continues with live events after history. Default: false (history only).
+     */
     readonly subscribe: (input: {
       path: StreamPath;
       from?: Offset;

@@ -3,7 +3,7 @@
  */
 import { Context, Effect, Schema, Stream } from "effect";
 
-import type { Event, EventInput } from "../../domain.js";
+import type { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 
 // -------------------------------------------------------------------------------------
 // Errors
@@ -29,7 +29,20 @@ export interface StreamClientConfig {
 export class StreamClient extends Context.Tag("@app/StreamClient")<
   StreamClient,
   {
-    readonly subscribe: (path: string) => Stream.Stream<Event, StreamClientError>;
-    readonly append: (path: string, event: EventInput) => Effect.Effect<void, StreamClientError>;
+    /**
+     * Subscribe to events on a stream.
+     * @param from - Last seen offset (exclusive). Returns events with offset > from.
+     * @param live - If true, continues with live events after history. Default: false (history only).
+     */
+    readonly subscribe: (input: {
+      path: StreamPath;
+      from?: Offset;
+      live?: boolean;
+    }) => Stream.Stream<Event, StreamClientError>;
+
+    readonly append: (input: {
+      path: StreamPath;
+      event: EventInput;
+    }) => Effect.Effect<void, StreamClientError>;
   }
 >() {}

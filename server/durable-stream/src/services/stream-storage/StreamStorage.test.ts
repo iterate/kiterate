@@ -82,7 +82,7 @@ const streamStorageTests = <E>(
       }).pipe(Effect.provide(makeLayer())),
     );
 
-    it.effect("read with from filters events", () =>
+    it.effect("read with from filters events (exclusive - returns events after from)", () =>
       Effect.gen(function* () {
         const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/filter");
@@ -100,14 +100,16 @@ const streamStorageTests = <E>(
           event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
         });
 
+        // from="0000000000000001" means "I've seen offset 1, give me what's after"
         const events = yield* storage
           .read({ path, from: Offset.make("0000000000000001") })
           .pipe(Stream.runCollect);
         const arr = Chunk.toReadonlyArray(events);
 
-        expect(arr).toHaveLength(2);
-        expect(arr.map((e) => e.offset)).toEqual(["0000000000000001", "0000000000000002"]);
-        expect(arr.map((e) => e.payload)).toEqual([{ n: 1 }, { n: 2 }]);
+        // Should only get offset 2 (after offset 1)
+        expect(arr).toHaveLength(1);
+        expect(arr.map((e) => e.offset)).toEqual(["0000000000000002"]);
+        expect(arr.map((e) => e.payload)).toEqual([{ n: 2 }]);
       }).pipe(Effect.provide(makeLayer())),
     );
 

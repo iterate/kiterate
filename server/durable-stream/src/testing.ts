@@ -3,7 +3,7 @@
  */
 import { Chunk, Effect, Queue, Stream, Take } from "effect";
 
-import type { Event } from "./domain.js";
+import type { Event, StreamPath } from "./domain.js";
 import * as StreamClient from "./services/stream-client/index.js";
 
 // -------------------------------------------------------------------------------------
@@ -32,10 +32,13 @@ export const makeSubscription = <A, E>(queue: Queue.Dequeue<Take.Take<A, E>>): S
 // Uses Stream.toQueue which works with parsed event streams
 // -------------------------------------------------------------------------------------
 
-export const subscribeClient = (path: string) =>
+export const subscribeClient = (path: StreamPath) =>
   Effect.gen(function* () {
     const client = yield* StreamClient.StreamClient;
-    const stream: Stream.Stream<Event, StreamClient.StreamClientError> = client.subscribe(path);
+    const stream: Stream.Stream<Event, StreamClient.StreamClientError> = client.subscribe({
+      path,
+      live: true,
+    });
     const queue: Queue.Dequeue<Take.Take<Event, StreamClient.StreamClientError>> =
       yield* Stream.toQueue(stream);
     yield* Effect.sleep("10 millis");

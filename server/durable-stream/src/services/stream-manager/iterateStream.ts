@@ -1,7 +1,7 @@
 /**
  * IterateStream - single stream with history and replay
  */
-import { Effect, PubSub, Stream } from "effect";
+import { Effect, PubSub, Ref, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage, StreamStorageError } from "../stream-storage/service.js";
@@ -12,7 +12,11 @@ import { StreamStorage, StreamStorageError } from "../stream-storage/service.js"
 
 export interface IterateStream {
   readonly append: (input: { event: EventInput }) => Effect.Effect<void, StreamStorageError>;
-  /** Subscribe with optional offset. live=false (default) for historical only, live=true for live only */
+  /**
+   * Subscribe to events on this stream.
+   * @param from - Last seen offset (exclusive). Returns events with offset > from.
+   * @param live - If true, continues with live events after history. Default: false (history only).
+   */
   readonly subscribe: (options?: {
     from?: Offset;
     live?: boolean;
@@ -43,14 +47,31 @@ export const make = (input: {
           const from = options?.from ?? Offset.make("-1");
           const live = options?.live ?? false;
 
-          // Live only mode
-          if (live) {
-            const queue = yield* PubSub.subscribe(pubsub);
-            return Stream.fromQueue(queue);
+          if (!live) {
+            // Historical only - no PubSub subscription
+            return storage.read({ path, from });
           }
 
-          // Historical only (default)
-          return storage.read({ path, from });
+          // Live mode: history + live with deduplication
+          // Subscribe to PubSub first (don't miss events during history replay)
+          const queue = yield* PubSub.subscribe(pubsub);
+          const liveStream = Stream.fromQueue(queue);
+
+          const historicalStream = storage.read({ path, from });
+          const lastOffsetRef = yield* Ref.make<Offset>(from);
+
+          // Track last historical offset, then filter live to only new events
+          const trackedHistorical = historicalStream.pipe(
+            Stream.tap((event) => Ref.set(lastOffsetRef, event.offset)),
+          );
+
+          const dedupedLive = liveStream.pipe(
+            Stream.filterEffect((event) =>
+              Ref.get(lastOffsetRef).pipe(Effect.map((lastOffset) => event.offset > lastOffset)),
+            ),
+          );
+
+          return Stream.concat(trackedHistorical, dedupedLive);
         }),
       );
 

@@ -5,7 +5,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Scope } from "effect";
 
-import { EventInput, EventType } from "./domain.js";
+import { EventInput, EventType, StreamPath } from "./domain.js";
 import { AppLive } from "./server.js";
 import * as StreamClient from "./services/stream-client/index.js";
 import { liveLayer as streamManagerLiveLayer } from "./services/stream-manager/live.js";
@@ -34,15 +34,16 @@ describe("StreamClient", () => {
     "append and subscribe round-trip",
     Effect.gen(function* () {
       const client = yield* StreamClient.StreamClient;
-      const { take } = yield* subscribeClient("test/roundtrip");
+      const path = StreamPath.make("test/roundtrip");
+      const { take } = yield* subscribeClient(path);
 
-      yield* client.append(
-        "test/roundtrip",
-        EventInput.make({
+      yield* client.append({
+        path,
+        event: EventInput.make({
           type: EventType.make("test"),
           payload: { message: "hello from client" },
         }),
-      );
+      });
 
       const event = yield* take;
       expect(event.payload["message"]).toBe("hello from client");
@@ -53,20 +54,21 @@ describe("StreamClient", () => {
     "multiple events in sequence",
     Effect.gen(function* () {
       const client = yield* StreamClient.StreamClient;
-      const { takeN } = yield* subscribeClient("test/sequence");
+      const path = StreamPath.make("test/sequence");
+      const { takeN } = yield* subscribeClient(path);
 
-      yield* client.append(
-        "test/sequence",
-        EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
-      );
-      yield* client.append(
-        "test/sequence",
-        EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
-      );
-      yield* client.append(
-        "test/sequence",
-        EventInput.make({ type: EventType.make("test"), payload: { n: 3 } }),
-      );
+      yield* client.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+      });
+      yield* client.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+      });
+      yield* client.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { n: 3 } }),
+      });
 
       const events = yield* takeN(3);
       expect(events.map((e) => e.payload["n"])).toEqual([1, 2, 3]);
@@ -77,13 +79,15 @@ describe("StreamClient", () => {
     "different paths are independent",
     Effect.gen(function* () {
       const client = yield* StreamClient.StreamClient;
-      const subA = yield* subscribeClient("test/path/a");
-      const subB = yield* subscribeClient("test/path/b");
+      const pathA = StreamPath.make("test/path/a");
+      const pathB = StreamPath.make("test/path/b");
+      const subA = yield* subscribeClient(pathA);
+      const subB = yield* subscribeClient(pathB);
 
-      yield* client.append(
-        "test/path/a",
-        EventInput.make({ type: EventType.make("test"), payload: { source: "A" } }),
-      );
+      yield* client.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { source: "A" } }),
+      });
 
       const eventA = yield* subA.take;
       expect(eventA.payload["source"]).toBe("A");

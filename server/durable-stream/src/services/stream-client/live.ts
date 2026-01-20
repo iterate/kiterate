@@ -4,7 +4,7 @@
 import { HttpClient, HttpClientRequest } from "@effect/platform";
 import { Effect, Layer, Stream } from "effect";
 
-import type { Event, EventInput } from "../../domain.js";
+import type { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamClient, StreamClientConfig, StreamClientError } from "./service.js";
 
 // -------------------------------------------------------------------------------------
@@ -15,12 +15,21 @@ export const make = (config: StreamClientConfig) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
 
-    const subscribe = (path: string): Stream.Stream<Event, StreamClientError> =>
+    const subscribe = (input: {
+      path: StreamPath;
+      from?: Offset;
+      live?: boolean;
+    }): Stream.Stream<Event, StreamClientError> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const response = yield* client.execute(
-            HttpClientRequest.get(`${config.baseUrl}/agents/${path}`),
-          );
+          const params = new URLSearchParams();
+          if (input.from) params.set("offset", input.from);
+          if (input.live) params.set("live", "true");
+          const query = params.toString();
+          const url = query
+            ? `${config.baseUrl}/agents/${input.path}?${query}`
+            : `${config.baseUrl}/agents/${input.path}`;
+          const response = yield* client.execute(HttpClientRequest.get(url));
 
           return response.stream.pipe(
             Stream.mapError((cause) => StreamClientError.make({ operation: "subscribe", cause })),
@@ -32,11 +41,11 @@ export const make = (config: StreamClientConfig) =>
         ),
       );
 
-    const append = (path: string, event: EventInput) =>
+    const append = (input: { path: StreamPath; event: EventInput }) =>
       client
         .execute(
-          HttpClientRequest.post(`${config.baseUrl}/agents/${path}`).pipe(
-            HttpClientRequest.bodyUnsafeJson(event),
+          HttpClientRequest.post(`${config.baseUrl}/agents/${input.path}`).pipe(
+            HttpClientRequest.bodyUnsafeJson(input.event),
           ),
         )
         .pipe(

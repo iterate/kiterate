@@ -26,7 +26,9 @@ const test = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpCli
 const subscribe = (path: string) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
-    const response = yield* client.execute(HttpClientRequest.get(path));
+    // Pass live=true to receive live events after subscribing
+    const url = path.includes("?") ? `${path}&live=true` : `${path}?live=true`;
+    const response = yield* client.execute(HttpClientRequest.get(url));
     return yield* response.stream.pipe(Stream.decodeText(), Stream.take(1), Stream.runCollect);
   }).pipe(Effect.fork);
 

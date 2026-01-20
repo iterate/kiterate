@@ -34,8 +34,9 @@ export const inMemoryLayer: Layer.Layer<StreamStorage> = Layer.sync(StreamStorag
     read: ({ path, from }) =>
       Stream.suspend(() => {
         const stream = getOrCreateStream(path);
+        // from = last seen offset, so return events AFTER it (exclusive)
         const events =
-          from !== undefined ? stream.events.filter((e) => e.offset >= from) : stream.events;
+          from !== undefined ? stream.events.filter((e) => e.offset > from) : stream.events;
         return Stream.fromIterable(events);
       }),
   });

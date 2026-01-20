@@ -16,7 +16,15 @@ export type Offset = typeof Offset.Type;
 export const EventType = Schema.String.pipe(Schema.brand("EventType"));
 export type EventType = typeof EventType.Type;
 
-export const Version = Schema.String.pipe(Schema.brand("Version"));
+// Accept string or number, coerce to string
+const VersionFromInput = Schema.Union(
+  Schema.String,
+  Schema.transform(Schema.Number, Schema.String, {
+    decode: (n) => String(n),
+    encode: (s) => Number(s),
+  }),
+);
+export const Version = VersionFromInput.pipe(Schema.brand("Version"));
 export type Version = typeof Version.Type;
 
 export const Payload = Schema.Record({ key: Schema.String, value: Schema.Unknown });

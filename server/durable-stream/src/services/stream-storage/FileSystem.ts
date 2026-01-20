@@ -88,7 +88,8 @@ export const fileSystemLayer = (
                 lines.map((line) => Schema.decodeUnknown(JsonEvent)(line)),
               );
 
-              const filtered = from !== undefined ? events.filter((e) => e.offset >= from) : events;
+              // from = last seen offset, so return events AFTER it (exclusive)
+              const filtered = from !== undefined ? events.filter((e) => e.offset > from) : events;
 
               return Stream.fromIterable(filtered);
             }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
