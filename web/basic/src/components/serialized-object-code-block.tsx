@@ -14,6 +14,30 @@ import { Switch } from "./ui/switch.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip.tsx";
 import { cn } from "@/lib/utils.ts";
 
+// Truncate long base64-like strings for display
+const BASE64_THRESHOLD = 100;
+const BASE64_REGEX = /^[A-Za-z0-9+/=]{100,}$/;
+
+function truncateLongStrings(data: unknown): unknown {
+  if (typeof data === "string") {
+    if (data.length > BASE64_THRESHOLD && BASE64_REGEX.test(data)) {
+      return `<base64: ${data.length} chars>`;
+    }
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(truncateLongStrings);
+  }
+  if (data !== null && typeof data === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+      result[key] = truncateLongStrings(value);
+    }
+    return result;
+  }
+  return data;
+}
+
 interface CodeMirrorProps {
   value: string;
   extensions: NonNullable<ConstructorParameters<typeof EditorView>[0]>["extensions"];
@@ -65,16 +89,19 @@ export function SerializedObjectCodeBlock({
   const [currentFormat, setCurrentFormat] = useState<"yaml" | "json">(initialFormat);
   const { resolvedTheme } = useTheme();
 
+  // Truncate long base64 strings for display
+  const displayData = truncateLongStrings(data);
+
   let code: string;
   try {
-    if (data === undefined) {
+    if (displayData === undefined) {
       code = currentFormat === "yaml" ? "undefined" : '"undefined"';
-    } else if (data === null) {
+    } else if (displayData === null) {
       code = currentFormat === "yaml" ? "null" : "null";
     } else if (currentFormat === "yaml") {
-      code = stringifyYaml(data);
+      code = stringifyYaml(displayData);
     } else {
-      code = JSON.stringify(data, null, 2);
+      code = JSON.stringify(displayData, null, 2);
     }
   } catch (error) {
     code =
