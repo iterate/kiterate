@@ -10,6 +10,9 @@
 
 import { get, set, del, createStore } from "idb-keyval";
 
+// Toggle to disable IndexedDB caching without removing implementation.
+export const EVENT_STORAGE_ENABLED = false;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
