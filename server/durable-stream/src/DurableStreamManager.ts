@@ -195,11 +195,11 @@ export const InMemoryDurableStreamManager: Layer.Layer<DurableStreamManager> =
 // -------------------------------------------------------------------------------------
 
 if (import.meta.vitest) {
-  const { it, expect, describe } = import.meta.vitest;
+  const { it, expect, describe } = await import("@effect/vitest");
 
   describe("DurableStreamManager", () => {
-    it("late subscriber receives historical events", async () => {
-      const program = Effect.gen(function* () {
+    it.effect("late subscriber receives historical events", () =>
+      Effect.gen(function* () {
         const manager = yield* DurableStreamManager;
         const path = StreamPath.make("test/durable");
 
@@ -218,13 +218,11 @@ if (import.meta.vitest) {
         expect(arr[0].payload).toEqual({ message: "first" });
         expect(arr[1].seq).toBe(1);
         expect(arr[1].payload).toEqual({ message: "second" });
-      }).pipe(Effect.provide(InMemoryDurableStreamManager));
+      }).pipe(Effect.provide(InMemoryDurableStreamManager)),
+    );
 
-      await Effect.runPromise(program);
-    });
-
-    it("subscribe with fromSeq skips earlier events", async () => {
-      const program = Effect.gen(function* () {
+    it.effect("subscribe with fromSeq skips earlier events", () =>
+      Effect.gen(function* () {
         const manager = yield* DurableStreamManager;
         const path = StreamPath.make("test/offset");
 
@@ -241,13 +239,11 @@ if (import.meta.vitest) {
         const arr = Chunk.toReadonlyArray(events);
         expect(arr.map((e) => e.seq)).toEqual([1, 2]);
         expect(arr.map((e) => e.payload)).toEqual([{ idx: 1 }, { idx: 2 }]);
-      }).pipe(Effect.provide(InMemoryDurableStreamManager));
+      }).pipe(Effect.provide(InMemoryDurableStreamManager)),
+    );
 
-      await Effect.runPromise(program);
-    });
-
-    it("receives both historical and live events", async () => {
-      const program = Effect.gen(function* () {
+    it.live("receives both historical and live events", () =>
+      Effect.gen(function* () {
         const manager = yield* DurableStreamManager;
         const path = StreamPath.make("test/hybrid");
 
@@ -268,13 +264,11 @@ if (import.meta.vitest) {
         const events = yield* subscriber;
         const arr = Chunk.toReadonlyArray(events);
         expect(arr.map((e) => e.payload)).toEqual([{ type: "historical" }, { type: "live" }]);
-      }).pipe(Effect.provide(InMemoryDurableStreamManager));
+      }).pipe(Effect.provide(InMemoryDurableStreamManager)),
+    );
 
-      await Effect.runPromise(program);
-    });
-
-    it("subscribe with fromSeq=-1 receives only live events", async () => {
-      const program = Effect.gen(function* () {
+    it.live("subscribe with fromSeq=-1 receives only live events", () =>
+      Effect.gen(function* () {
         const manager = yield* DurableStreamManager;
         const path = StreamPath.make("test/live-only");
 
@@ -298,9 +292,7 @@ if (import.meta.vitest) {
         expect(arr).toHaveLength(1);
         expect(arr[0].seq).toBe(1);
         expect(arr[0].payload).toEqual({ type: "live" });
-      }).pipe(Effect.provide(InMemoryDurableStreamManager));
-
-      await Effect.runPromise(program);
-    });
+      }).pipe(Effect.provide(InMemoryDurableStreamManager)),
+    );
   });
 }
