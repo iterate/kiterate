@@ -413,7 +413,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
                   <>
                     {audioState.devices.length > 1 && (
                       <Select
-                        value={audioState.selectedDeviceId ?? undefined}
+                        value={audioState.selectedDeviceId ?? ""}
                         onValueChange={audioControls.selectDevice}
                       >
                         <SelectTrigger className="h-8 w-[140px] text-xs">
