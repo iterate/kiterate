@@ -240,14 +240,18 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
     };
 
     // Schedule a reconnection attempt
-    const scheduleReconnect = () => {
+    const scheduleReconnect = (message?: string) => {
       if (cancelled || reconnectTimeout) return;
 
       const delay = getReconnectDelay();
       console.log(
         `[durable-stream] Scheduling reconnect in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempt + 1})`,
       );
-      setConnectionStatus({ state: "connecting" });
+      if (message) {
+        setConnectionStatus({ state: "error", message });
+      } else {
+        setConnectionStatus({ state: "connecting" });
+      }
 
       reconnectTimeout = setTimeout(() => {
         reconnectTimeout = null;
@@ -342,32 +346,27 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
             if (cancelled) return;
 
             const es = eventSource;
-            if (es?.readyState === EventSource.CLOSED) {
-              // Connection was closed - attempt reconnect
-              console.log("[durable-stream] SSE connection closed, will reconnect");
-              eventSource?.close();
-              eventSource = null;
-              isLive = false;
-              scheduleReconnect();
-            } else if (es?.readyState === EventSource.CONNECTING) {
-              // Browser is auto-reconnecting
-              setConnectionStatus({ state: "connecting" });
-            } else {
-              // Other error - close and reconnect manually
-              console.log("[durable-stream] SSE error, will reconnect");
-              eventSource?.close();
-              eventSource = null;
-              isLive = false;
-              scheduleReconnect();
-            }
+            const reason =
+              es?.readyState === EventSource.CLOSED
+                ? "Connection closed"
+                : es?.readyState === EventSource.CONNECTING
+                  ? "Connection interrupted"
+                  : "Connection error";
+
+            console.log(`[durable-stream] SSE error (${reason}), will reconnect`);
+            eventSource?.close();
+            eventSource = null;
+            isLive = false;
+            scheduleReconnect(reason);
           };
         })
         .catch((err) => {
           if (cancelled) return;
           console.error("[durable-stream] Catchup error:", err);
-          setConnectionStatus({ state: "error", message: err.message });
+          const message = err instanceof Error ? err.message : "Catchup failed";
+          setConnectionStatus({ state: "error", message });
           setIsReady(true); // Allow UI to render even on error
-          scheduleReconnect(); // Try to reconnect
+          scheduleReconnect(message); // Try to reconnect
         });
     };
 
