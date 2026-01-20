@@ -16,3 +16,4 @@ export class Event extends Schema.Class<Event>("Event")({
   offset: Offset,
   payload: Payload,
 }) {}
+// { offset: "-1", payload: { type: } }

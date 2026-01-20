@@ -11,6 +11,7 @@ export { Event, Offset, Payload, StreamPath } from "./domain.js";
 export * as StreamStorage from "./services/stream-storage/index.js";
 export * as StreamManager from "./services/stream-manager/index.js";
 export * as StreamClient from "./services/stream-client/index.js";
+export * as AgentManager from "./services/agent-manager/index.js";
 
 // HTTP server
 export { AppLive, ServerLive } from "./server.js";

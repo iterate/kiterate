@@ -19,7 +19,7 @@ export type StreamStorageTypeId = typeof StreamStorageTypeId;
 export class StreamStorageError extends Schema.TaggedError<StreamStorageError>()(
   "StreamStorageError",
   {
-    cause: Schema.Unknown,
+    cause: Schema.Defect,
   },
 ) {}
 

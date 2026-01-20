@@ -13,7 +13,7 @@ export class StreamClientError extends Schema.TaggedError<StreamClientError>()(
   "StreamClientError",
   {
     operation: Schema.Literal("subscribe", "append"),
-    cause: Schema.Unknown,
+    cause: Schema.Defect,
   },
 ) {}
 

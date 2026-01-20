@@ -25,6 +25,7 @@ Never guess at Effect patterns - check the guide or `.reference/effect/` first.
 
 - **No type casts (`as`)** - use Schema decoding or type guards instead
 - **Use `.make()` not `new`** for Schema classes (use `Schema.TaggedError` not `Data.TaggedError`)
+- **Use `Schema.Defect`** for wrapping unknown causes in TaggedErrors (not `Schema.Unknown`)
 
 ## Effect Naming Conventions
 
@@ -36,3 +37,25 @@ Never guess at Effect patterns - check the guide or `.reference/effect/` first.
   // then: StreamStorage.inMemoryLayer, StreamStorage.StreamStorageService
   ```
 - **Service folder pattern**: `service.ts` for definitions, layer files import from service, `index.ts` re-exports all
+
+## Effect Service Patterns
+
+- **Service definition** with `Context.Tag`:
+  ```ts
+  export class MyService extends Context.Tag("@app/MyService")<
+    MyService,
+    {
+      readonly doSomething: (input: string) => Effect.Effect<void, MyError>;
+    }
+  >() {}
+  ```
+- **Layer construction** with `ServiceTag.of()`:
+  ```ts
+  const make = Effect.gen(function* () {
+    const dep = yield* SomeDep;
+    return MyService.of({
+      doSomething: (input) => Effect.succeed(void 0),
+    });
+  });
+  export const liveLayer = Layer.effect(MyService, make);
+  ```

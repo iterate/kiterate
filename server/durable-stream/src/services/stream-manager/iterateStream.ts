@@ -6,15 +6,6 @@ import { Effect, PubSub, Stream } from "effect";
 import { Event, Offset, Payload, StreamPath } from "../../domain.js";
 import { StreamStorage, StreamStorageError } from "../stream-storage/service.js";
 
-// AgentManager
-// - subscribe would delegate to the StreamManager
-// - append would, before delegating:
-//   - validate the input/schema (maybe)
-//   - calls append on the StreamManager
-//   - possibly make an LLM request
-//     - hit streaming openai endpoint + append its responses
-//
-
 // -------------------------------------------------------------------------------------
 // IterateStream interface
 // -------------------------------------------------------------------------------------
