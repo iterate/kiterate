@@ -6,7 +6,7 @@
 import { HttpClient, HttpClientRequest } from "@effect/platform";
 import { Context, Effect, Layer, Stream } from "effect";
 
-import type { Event } from "./StreamManager.js";
+import type { Event } from "./DurableStreamManager.js";
 
 // -------------------------------------------------------------------------------------
 // Service definition

@@ -3,12 +3,12 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
+import { InMemoryDurableStreamManager } from "./DurableStreamManager.js";
 import { AppLive } from "./server.js";
-import { InMemoryStreamManager } from "./StreamManager.js";
 
 const TestLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(InMemoryStreamManager), //
+    Layer.provide(InMemoryDurableStreamManager),
     Layer.provide(NodeHttpServer.layerTest),
   ),
   NodeHttpServer.layerTest,

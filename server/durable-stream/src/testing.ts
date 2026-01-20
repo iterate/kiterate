@@ -3,7 +3,7 @@
  */
 import { Chunk, Effect, Queue, Stream, Take } from "effect";
 
-import { Event } from "./StreamManager.js";
+import { Event } from "./DurableStreamManager.js";
 import { StreamClient } from "./StreamClient.js";
 
 // -------------------------------------------------------------------------------------

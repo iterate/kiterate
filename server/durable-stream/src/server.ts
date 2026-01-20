@@ -10,17 +10,17 @@ import {
 import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer, Schema, Stream } from "effect";
 
+import { DurableStreamManager, StreamPath, Payload } from "./DurableStreamManager.js";
 import * as Sse from "./Sse.js";
-import { StreamManager, StreamPath, Event } from "./StreamManager.js";
 
 // GET /agents/* -> SSE stream
 const subscribeHandler = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
-  const path = req.url.replace(/^\/agents\//, "").split("?")[0];
-  const streamPath = StreamPath.make(path);
-  const manager = yield* StreamManager;
+  const rawPath = req.url.replace(/^\/agents\//, "").split("?")[0];
+  const path = StreamPath.make(rawPath);
+  const manager = yield* DurableStreamManager;
 
-  const stream = manager.subscribe({ streamPath }).pipe(Stream.map(Sse.data));
+  const stream = manager.subscribe({ path, live: true }).pipe(Stream.map(Sse.data));
 
   return Sse.response(stream);
 });
@@ -28,13 +28,13 @@ const subscribeHandler = Effect.gen(function* () {
 // POST /agents/* -> append event
 const appendHandler = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
-  const path = req.url.replace(/^\/agents\//, "");
-  const streamPath = StreamPath.make(path);
+  const rawPath = req.url.replace(/^\/agents\//, "");
+  const path = StreamPath.make(rawPath);
   const body = yield* req.json;
-  const event = yield* Schema.decodeUnknown(Event)(body);
+  const payload = yield* Schema.decodeUnknown(Payload)(body);
 
-  const manager = yield* StreamManager;
-  yield* manager.append({ streamPath, event });
+  const manager = yield* DurableStreamManager;
+  yield* manager.append({ path, payload });
 
   return HttpServerResponse.empty({ status: 204 });
 }).pipe(
