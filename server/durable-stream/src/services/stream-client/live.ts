@@ -1,44 +1,11 @@
 /**
- * StreamClient - Effect service for consuming durable streams
- *
- * Platform-agnostic: provide NodeHttpClient.layer (CLI) or FetchHttpClient.layer (browser)
+ * Live implementation of StreamClient
  */
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Context, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 
-import type { Event } from "./domain.js";
-
-// -------------------------------------------------------------------------------------
-// Errors
-// -------------------------------------------------------------------------------------
-
-export class StreamClientError extends Schema.TaggedError<StreamClientError>()(
-  "StreamClientError",
-  {
-    operation: Schema.Literal("subscribe", "append"),
-    cause: Schema.Unknown,
-  },
-) {}
-
-// -------------------------------------------------------------------------------------
-// Service definition
-// -------------------------------------------------------------------------------------
-
-export interface StreamClientConfig {
-  /** Base URL for the server. Use empty string if HttpClient is already configured (e.g., from layerTest) */
-  readonly baseUrl: string;
-}
-
-export class StreamClient extends Context.Tag("@app/StreamClient")<
-  StreamClient,
-  {
-    readonly subscribe: (path: string) => Stream.Stream<Event, StreamClientError>;
-    readonly append: (
-      path: string,
-      event: Record<string, unknown>,
-    ) => Effect.Effect<void, StreamClientError>;
-  }
->() {}
+import type { Event } from "../../domain.js";
+import { StreamClient, StreamClientConfig, StreamClientError } from "./service.js";
 
 // -------------------------------------------------------------------------------------
 // Live implementation
@@ -80,7 +47,7 @@ export const make = (config: StreamClientConfig) =>
     return { subscribe, append };
   });
 
-export const layer = (
+export const liveLayer = (
   config: StreamClientConfig,
 ): Layer.Layer<StreamClient, never, HttpClient.HttpClient> =>
   Layer.effect(StreamClient, make(config));

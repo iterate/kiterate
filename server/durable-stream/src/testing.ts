@@ -4,7 +4,7 @@
 import { Chunk, Effect, Queue, Stream, Take } from "effect";
 
 import type { Event } from "./domain.js";
-import { StreamClient, StreamClientError } from "./StreamClient.js";
+import * as StreamClient from "./services/stream-client/index.js";
 
 // -------------------------------------------------------------------------------------
 // Subscription helper - wraps a queue with take/takeN methods
@@ -34,9 +34,10 @@ export const makeSubscription = <A, E>(queue: Queue.Dequeue<Take.Take<A, E>>): S
 
 export const subscribeClient = (path: string) =>
   Effect.gen(function* () {
-    const client = yield* StreamClient;
-    const stream: Stream.Stream<Event, StreamClientError> = client.subscribe(path);
-    const queue: Queue.Dequeue<Take.Take<Event, StreamClientError>> = yield* Stream.toQueue(stream);
+    const client = yield* StreamClient.StreamClient;
+    const stream: Stream.Stream<Event, StreamClient.StreamClientError> = client.subscribe(path);
+    const queue: Queue.Dequeue<Take.Take<Event, StreamClient.StreamClientError>> =
+      yield* Stream.toQueue(stream);
     yield* Effect.sleep("10 millis");
     return makeSubscription(queue);
   });

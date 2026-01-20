@@ -6,9 +6,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Scope } from "effect";
 
 import { AppLive } from "./server.js";
+import * as StreamClient from "./services/stream-client/index.js";
 import { liveLayer as streamManagerLiveLayer } from "./services/stream-manager/live.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
-import { StreamClient, layer as StreamClientLayer } from "./StreamClient.js";
 import { subscribeClient } from "./testing.js";
 
 const testLayer = Layer.merge(
@@ -17,10 +17,13 @@ const testLayer = Layer.merge(
     Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),
   ),
-  StreamClientLayer({ baseUrl: "" }).pipe(Layer.provide(NodeHttpServer.layerTest)),
+  StreamClient.liveLayer({ baseUrl: "" }).pipe(Layer.provide(NodeHttpServer.layerTest)),
 );
 
-const test = <A, E>(name: string, effect: Effect.Effect<A, E, StreamClient | Scope.Scope>) =>
+const test = <A, E>(
+  name: string,
+  effect: Effect.Effect<A, E, StreamClient.StreamClient | Scope.Scope>,
+) =>
   it.live(name, () =>
     effect.pipe(Effect.timeout("2 seconds"), Effect.provide(testLayer), Effect.scoped),
   );
@@ -29,7 +32,7 @@ describe("StreamClient", () => {
   test(
     "append and subscribe round-trip",
     Effect.gen(function* () {
-      const client = yield* StreamClient;
+      const client = yield* StreamClient.StreamClient;
       const { take } = yield* subscribeClient("test/roundtrip");
 
       yield* client.append("test/roundtrip", { message: "hello from client" });
@@ -42,7 +45,7 @@ describe("StreamClient", () => {
   test(
     "multiple events in sequence",
     Effect.gen(function* () {
-      const client = yield* StreamClient;
+      const client = yield* StreamClient.StreamClient;
       const { takeN } = yield* subscribeClient("test/sequence");
 
       yield* client.append("test/sequence", { n: 1 });
@@ -57,7 +60,7 @@ describe("StreamClient", () => {
   test(
     "different paths are independent",
     Effect.gen(function* () {
-      const client = yield* StreamClient;
+      const client = yield* StreamClient.StreamClient;
       const subA = yield* subscribeClient("test/path/a");
       const subB = yield* subscribeClient("test/path/b");
 
