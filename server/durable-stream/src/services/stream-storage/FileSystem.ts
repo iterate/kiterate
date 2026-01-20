@@ -9,11 +9,11 @@ import * as Path from "@effect/platform/Path";
 import { Effect, Layer, Stream } from "effect";
 
 import { Event, Offset, Payload, StreamPath } from "../../domain.js";
-import { StreamStorageService } from "./index.js";
+import { StreamStorageError, StreamStorageService } from "./index.js";
 
 export const FileSystemLayer = (
   basePath: string,
-): Layer.Layer<StreamStorageService, never, Fs.FileSystem | Path.Path> =>
+): Layer.Layer<StreamStorageService, StreamStorageError, Fs.FileSystem | Path.Path> =>
   Layer.effect(
     StreamStorageService,
     Effect.gen(function* () {
@@ -44,7 +44,7 @@ export const FileSystemLayer = (
       const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
 
       return {
-        append: ({ path: streamPath, payload }) =>
+        append: ({ path: streamPath, payload }: { path: StreamPath; payload: Payload }) =>
           Effect.gen(function* () {
             const filePath = getFilePath(streamPath);
 
@@ -61,9 +61,9 @@ export const FileSystemLayer = (
             yield* writeOffsetFile(streamPath, nextOffset + 1);
 
             return event;
-          }),
+          }).pipe(Effect.mapError((cause) => new StreamStorageError({ cause }))),
 
-        read: ({ path: streamPath, from }) =>
+        read: ({ path: streamPath, from }: { path: StreamPath; from?: Offset }) =>
           Stream.unwrap(
             Effect.gen(function* () {
               const filePath = getFilePath(streamPath);
@@ -87,8 +87,8 @@ export const FileSystemLayer = (
               const filtered = from !== undefined ? events.filter((e) => e.offset >= from) : events;
 
               return Stream.fromIterable(filtered);
-            }),
+            }).pipe(Effect.mapError((cause) => new StreamStorageError({ cause }))),
           ),
       };
-    }),
+    }).pipe(Effect.mapError((cause) => new StreamStorageError({ cause }))),
   );

@@ -1,13 +1,10 @@
 /**
  * StreamStorage test suite - runs against all implementations
  */
-import * as NFs from "@effect/platform-node/NodeFileSystem";
-import * as NPath from "@effect/platform-node/NodePath";
+import { FileSystem } from "@effect/platform";
+import { NodeContext } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
-import * as nodeFs from "node:fs";
-import * as os from "node:os";
-import * as nodePath from "node:path";
 
 import { Offset, StreamPath } from "../../domain.js";
 import { FileSystemLayer } from "./FileSystem.js";
@@ -17,7 +14,10 @@ import { StreamStorageService } from "./index.js";
 /**
  * Shared test suite for StreamStorage implementations
  */
-const streamStorageTests = (name: string, makeLayer: () => Layer.Layer<StreamStorageService>) => {
+const streamStorageTests = <E>(
+  name: string,
+  makeLayer: () => Layer.Layer<StreamStorageService, E>,
+) => {
   describe(name, () => {
     it.effect("append returns event with offset", () =>
       Effect.gen(function* () {
@@ -138,14 +138,14 @@ describe("StreamStorage", () => {
   // In-memory implementation
   streamStorageTests("InMemory", () => InMemoryLayer);
 
-  // FileSystem implementation
-  let tempDir: string;
+  // FileSystem implementation - uses scoped temp directory that auto-cleans
+  const FileSystemTestLayer = Layer.unwrapScoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tempDir = yield* fs.makeTempDirectoryScoped();
+      return FileSystemLayer(tempDir);
+    }),
+  ).pipe(Layer.provide(NodeContext.layer));
 
-  const makeFileSystemLayer = () => {
-    tempDir = nodePath.join(os.tmpdir(), `stream-storage-test-${Date.now()}-${Math.random()}`);
-    return FileSystemLayer(tempDir).pipe(Layer.provide(NFs.layer), Layer.provide(NPath.layer));
-  };
-
-  // Clean up temp directories after each test
-  streamStorageTests("FileSystem", makeFileSystemLayer);
+  streamStorageTests("FileSystem", () => FileSystemTestLayer);
 });

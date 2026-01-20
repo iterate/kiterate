@@ -38,7 +38,7 @@ export const control = (payload: unknown): string =>
 /**
  * Create an SSE response from a stream of encoded SSE strings
  */
-export const response = (stream: Stream.Stream<string, never, never>) =>
+export const response = <E>(stream: Stream.Stream<string, E>) =>
   HttpServerResponse.stream(Stream.encodeText(stream), {
     contentType: "text/event-stream",
     headers: {

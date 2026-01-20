@@ -11,10 +11,14 @@ import { Chunk, Context, Effect, Layer, PubSub, Stream } from "effect";
 
 import { Event, Offset, Payload, StreamPath } from "./domain.js";
 import { InMemoryLayer as InMemoryStreamStorage } from "./services/stream-storage/InMemory.js";
-import { StreamStorage, StreamStorageService } from "./services/stream-storage/index.js";
+import {
+  StreamStorage,
+  StreamStorageError,
+  StreamStorageService,
+} from "./services/stream-storage/index.js";
 
 // Re-export types for convenience
-export { Event, Offset, Payload, StreamPath, StreamStorageService };
+export { Event, Offset, Payload, StreamPath, StreamStorageError, StreamStorageService };
 export type { StreamStorage };
 
 // -------------------------------------------------------------------------------------
@@ -22,9 +26,12 @@ export type { StreamStorage };
 // -------------------------------------------------------------------------------------
 
 export interface DurableIterateStream {
-  readonly append: (input: { payload: Payload }) => Effect.Effect<void>;
+  readonly append: (input: { payload: Payload }) => Effect.Effect<void, StreamStorageError>;
   /** Subscribe with optional offset. live=false (default) for historical only, live=true for live only */
-  readonly subscribe: (options?: { from?: Offset; live?: boolean }) => Stream.Stream<Event>;
+  readonly subscribe: (options?: {
+    from?: Offset;
+    live?: boolean;
+  }) => Stream.Stream<Event, StreamStorageError>;
 }
 
 export const DurableIterateStream = {
@@ -70,12 +77,15 @@ export const DurableIterateStream = {
 export class DurableStreamManager extends Context.Tag("@app/DurableStreamManager")<
   DurableStreamManager,
   {
-    readonly append: (input: { path: StreamPath; payload: Payload }) => Effect.Effect<void>;
+    readonly append: (input: {
+      path: StreamPath;
+      payload: Payload;
+    }) => Effect.Effect<void, StreamStorageError>;
     readonly subscribe: (input: {
       path: StreamPath;
       from?: Offset;
       live?: boolean;
-    }) => Stream.Stream<Event>;
+    }) => Stream.Stream<Event, StreamStorageError>;
   }
 >() {}
 
