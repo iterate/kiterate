@@ -52,10 +52,12 @@ const make = Effect.gen(function* () {
 
   const append = (input: { path: StreamPath; event: EventInput }) =>
     Effect.gen(function* () {
+      yield* Effect.log(`AgentManager.append: type=${input.event.type}`);
       yield* streamManager.append(input);
 
       const prompt = getGenerationPrompt(input.event);
       if (Option.isSome(prompt)) {
+        yield* Effect.log(`Triggering LLM generation for prompt: ${prompt.value.slice(0, 50)}...`);
         yield* appendLlmResponse(input.path, prompt.value);
       }
     }).pipe(Effect.mapError((cause) => AgentManagerError.make({ operation: "append", cause })));
@@ -80,9 +82,10 @@ const makeTest = Effect.gen(function* () {
     streamManager.subscribe(input);
 
   const append = (input: { path: StreamPath; event: EventInput }) =>
-    streamManager
-      .append(input)
-      .pipe(Effect.mapError((cause) => AgentManagerError.make({ operation: "append", cause })));
+    Effect.gen(function* () {
+      yield* Effect.log(`AgentManager(test).append: type=${input.event.type} [LLM disabled]`);
+      yield* streamManager.append(input);
+    }).pipe(Effect.mapError((cause) => AgentManagerError.make({ operation: "append", cause })));
 
   return AgentManager.of({ subscribe, append });
 });
