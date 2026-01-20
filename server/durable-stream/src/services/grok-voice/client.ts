@@ -3,7 +3,7 @@
  *
  * Simplified client that returns raw event streams from Grok.
  */
-import { Deferred, Effect, Layer, PubSub, Schema, Stream } from "effect";
+import { Config, Context, Deferred, Effect, Exit, Layer, Mailbox, Schema, Stream } from "effect";
 import WebSocket from "ws";
 
 // -------------------------------------------------------------------------------------
@@ -13,20 +13,30 @@ import WebSocket from "ws";
 export const VoiceName = Schema.Literal("ara", "rex", "sal", "eve", "leo");
 export type VoiceName = typeof VoiceName.Type;
 
-export const VoiceSessionConfig = Schema.Struct({
-  apiKey: Schema.String,
-  apiUrl: Schema.optional(Schema.String),
-  voice: Schema.optional(VoiceName),
-  sampleRate: Schema.optional(Schema.Number),
-  instructions: Schema.optional(Schema.String),
-});
-export type VoiceSessionConfig = typeof VoiceSessionConfig.Type;
-
 export const DEFAULT_API_URL = "wss://api.x.ai/v1/realtime";
 export const DEFAULT_SAMPLE_RATE = 48000;
 export const DEFAULT_VOICE: VoiceName = "ara";
 export const DEFAULT_INSTRUCTIONS =
   "You are a helpful voice assistant. Keep your responses conversational and concise since they will be spoken aloud.";
+
+export class GrokVoiceConfig extends Context.Tag("@grok/GrokVoiceConfig")<
+  GrokVoiceConfig,
+  {
+    readonly apiKey: string;
+    readonly apiUrl?: string;
+    readonly voice?: VoiceName;
+    readonly sampleRate?: number;
+    readonly instructions?: string;
+  }
+>() {
+  static defaultLayer = Layer.effect(
+    GrokVoiceConfig,
+    Effect.gen(function* () {
+      const apiKey = yield* Config.string("XAI_API_KEY");
+      return { apiKey };
+    }),
+  );
+}
 
 // -------------------------------------------------------------------------------------
 // Connection interface
@@ -50,16 +60,18 @@ export interface GrokVoiceConnection {
 // -------------------------------------------------------------------------------------
 
 export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/GrokVoiceClient", {
-  effect: Effect.succeed({
-    connect: (config: VoiceSessionConfig): Effect.Effect<GrokVoiceConnection, Error> =>
+  effect: Effect.gen(function* () {
+    const config = yield* GrokVoiceConfig;
+
+    const connect = (): Effect.Effect<GrokVoiceConnection, Error> =>
       Effect.gen(function* () {
         const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
         const voice = config.voice ?? DEFAULT_VOICE;
         const instructions = config.instructions ?? DEFAULT_INSTRUCTIONS;
         const sampleRate = config.sampleRate ?? DEFAULT_SAMPLE_RATE;
 
-        // PubSub for broadcasting events to all subscribers
-        const eventPubSub = yield* PubSub.unbounded<unknown>();
+        // Mailbox for broadcasting events to subscribers
+        const eventMailbox = yield* Mailbox.make<unknown>();
         const readyDeferred = yield* Deferred.make<void>();
 
         let ws: WebSocket | null = null;
@@ -118,13 +130,13 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
           socket.on("message", (data) => {
             try {
               const message = JSON.parse(data.toString());
-              Effect.runSync(PubSub.publish(eventPubSub, message));
+              eventMailbox.unsafeOffer(message);
 
               // Handle session setup
               if (message.type === "conversation.created" && !isConfigured) {
                 sendSessionConfig(socket);
               } else if (message.type === "session.updated") {
-                Effect.runSync(Deferred.succeed(readyDeferred, void 0));
+                Deferred.unsafeDone(readyDeferred, Effect.void);
               }
             } catch (e) {
               // Ignore parse errors
@@ -134,7 +146,7 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
           socket.on("error", (error) => resume(Effect.fail(error as Error)));
 
           socket.on("close", () => {
-            Effect.runSync(PubSub.shutdown(eventPubSub));
+            eventMailbox.unsafeDone(Exit.void);
           });
 
           return Effect.sync(() => socket.close());
@@ -143,12 +155,23 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
         const send = (audio: Buffer): Effect.Effect<void> =>
           Effect.sync(() => {
             if (ws?.readyState === WebSocket.OPEN) {
-              const msg = {
+              // Append audio to buffer
+              const appendMsg = {
                 type: "input_audio_buffer.append",
                 audio: audio.toString("base64"),
               };
-              logSend(msg);
-              ws.send(JSON.stringify(msg));
+              logSend(appendMsg);
+              ws.send(JSON.stringify(appendMsg));
+
+              // Commit the buffer (for push-to-talk / recorded audio)
+              const commitMsg = { type: "input_audio_buffer.commit" };
+              logSend(commitMsg);
+              ws.send(JSON.stringify(commitMsg));
+
+              // Trigger response
+              const responseMsg = { type: "response.create" };
+              logSend(responseMsg);
+              ws.send(JSON.stringify(responseMsg));
             }
           });
 
@@ -180,11 +203,14 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
 
         const waitForReady = Deferred.await(readyDeferred);
 
-        const events = Stream.fromPubSub(eventPubSub);
+        const events = Mailbox.toStream(eventMailbox);
 
         return { send, sendText, events, close, waitForReady };
-      }),
+      });
+
+    return { connect };
   }),
 }) {}
 
-export const GrokVoiceClientLive: Layer.Layer<GrokVoiceClient> = GrokVoiceClient.Default;
+export const GrokVoiceClientLive: Layer.Layer<GrokVoiceClient, never, GrokVoiceConfig> =
+  GrokVoiceClient.Default;

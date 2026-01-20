@@ -5,7 +5,7 @@
  * - Detect user messages and trigger Grok voice generation
  * - Append all raw Grok events to the stream
  */
-import { Config, ConfigError, Effect, Fiber, Layer, Option, Scope, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Scope, Stream } from "effect";
 
 import { EventInput, EventType, type Offset, type StreamPath } from "../../domain.js";
 import { GrokVoiceClient, type GrokVoiceConnection } from "../grok-voice/index.js";
@@ -14,7 +14,6 @@ import { StreamManager } from "./service.js";
 const make = Effect.gen(function* () {
   const inner = yield* StreamManager;
   const voiceClient = yield* GrokVoiceClient;
-  const apiKey = yield* Config.string("XAI_API_KEY");
   const scope = yield* Scope.Scope;
 
   // Lazy connection - established on first use
@@ -24,7 +23,7 @@ const make = Effect.gen(function* () {
 
   const getConnection = Effect.gen(function* () {
     if (connection) return connection;
-    const conn = yield* voiceClient.connect({ apiKey });
+    const conn = yield* voiceClient.connect();
     yield* conn.waitForReady;
     connection = conn;
     return conn;
@@ -51,7 +50,7 @@ const make = Effect.gen(function* () {
 
   /** Returns base64-encoded audio if this is an audio input event */
   const getAudioInput = (event: EventInput): Option.Option<Buffer> => {
-    if (event.type === "grok:input:audio") {
+    if (event.type === "iterate:agent:action:send-user-audio:called") {
       const audio = event.payload["audio"];
       if (typeof audio === "string") {
         return Option.some(Buffer.from(audio, "base64"));
@@ -129,11 +128,8 @@ const make = Effect.gen(function* () {
   return StreamManager.of({ subscribe, append });
 });
 
-export const grokLayer: Layer.Layer<
-  StreamManager,
-  ConfigError.ConfigError,
-  StreamManager | GrokVoiceClient
-> = Layer.scoped(StreamManager, make);
+export const grokLayer: Layer.Layer<StreamManager, never, StreamManager | GrokVoiceClient> =
+  Layer.scoped(StreamManager, make);
 
 // -------------------------------------------------------------------------------------
 // Test layer

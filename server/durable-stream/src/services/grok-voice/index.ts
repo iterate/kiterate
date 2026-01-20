@@ -5,8 +5,8 @@
 export {
   GrokVoiceClient,
   GrokVoiceClientLive,
+  GrokVoiceConfig,
   type GrokVoiceConnection,
-  type VoiceSessionConfig,
   type VoiceName,
   DEFAULT_API_URL,
   DEFAULT_INSTRUCTIONS,
