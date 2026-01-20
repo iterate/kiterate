@@ -32,6 +32,14 @@ import {
   openCodeReducer as innerOpenCodeReducer,
   type FeedItem as OpenCodeFeedItem,
 } from "./opencode";
+import { iterateReducer as innerIterateReducer, type FeedItem as IterateFeedItem } from "./iterate";
+import {
+  grokReducer as innerGrokReducer,
+  playAudio as grokPlayAudio,
+  type FeedItem as GrokFeedItem,
+} from "./grok";
+
+export { grokPlayAudio };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-export shared types from backend
@@ -77,6 +85,13 @@ export interface WrapperState {
   rawEvents: unknown[];
   openCodeMessageRoles: Map<string, "user" | "assistant">;
   openCodeMessageIndexes: Map<string, number>;
+  /** Iterate agent state */
+  iterateMessageIndexes: Map<string, number>;
+  iterateStreamingText: string;
+  iterateStreamingMessageId?: string | undefined;
+  /** Grok voice state */
+  grokStreamingTranscript: string;
+  grokAudioChunks: string[];
 }
 
 export function createInitialWrapperState(): WrapperState {
@@ -87,6 +102,10 @@ export function createInitialWrapperState(): WrapperState {
     rawEvents: [],
     openCodeMessageRoles: new Map(),
     openCodeMessageIndexes: new Map(),
+    iterateMessageIndexes: new Map(),
+    iterateStreamingText: "",
+    grokStreamingTranscript: "",
+    grokAudioChunks: [],
   };
 }
 
@@ -97,6 +116,8 @@ export function createInitialWrapperState(): WrapperState {
 const PI_EVENT = "iterate:agent:harness:pi:event-received";
 const CLAUDE_EVENT = "iterate:agent:harness:claude:event-received";
 const OPENCODE_EVENT = "iterate:agent:harness:opencode:event-received";
+const ITERATE_LLM_EVENT = "iterate:llm:response:sse";
+const GROK_EVENT = "grok:event";
 const USER_MSG = "iterate:agent:action:send-user-message:called";
 const AGENT_ERROR = "iterate:agent:error";
 
@@ -124,11 +145,24 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
   function insertEventItem(
     innerState: Omit<
       WrapperState,
-      "rawEvents" | "feed" | "openCodeMessageRoles" | "openCodeMessageIndexes"
+      | "rawEvents"
+      | "feed"
+      | "openCodeMessageRoles"
+      | "openCodeMessageIndexes"
+      | "iterateMessageIndexes"
+      | "iterateStreamingText"
+      | "iterateStreamingMessageId"
+      | "grokStreamingTranscript"
+      | "grokAudioChunks"
     > & {
       feed: InnerFeedItem[];
       openCodeMessageRoles?: Map<string, "user" | "assistant">;
       openCodeMessageIndexes?: Map<string, number>;
+      iterateMessageIndexes?: Map<string, number>;
+      iterateStreamingText?: string;
+      iterateStreamingMessageId?: string | undefined;
+      grokStreamingTranscript?: string;
+      grokAudioChunks?: string[];
     },
   ): WrapperState {
     const insertAt = state.feed.length;
@@ -148,6 +182,15 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
         openCodeMessageIndexes.set(messageId, index + 1);
       }
     }
+    const iterateMessageIndexes = new Map(
+      innerState.iterateMessageIndexes ?? state.iterateMessageIndexes,
+    );
+    for (const [messageId, index] of iterateMessageIndexes) {
+      if (index >= insertAt) {
+        iterateMessageIndexes.set(messageId, index + 1);
+      }
+    }
+
     return {
       ...innerState,
       feed,
@@ -155,6 +198,12 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
       rawEvents,
       openCodeMessageRoles: innerState.openCodeMessageRoles ?? state.openCodeMessageRoles,
       openCodeMessageIndexes,
+      iterateMessageIndexes,
+      iterateStreamingText: innerState.iterateStreamingText ?? state.iterateStreamingText,
+      iterateStreamingMessageId:
+        innerState.iterateStreamingMessageId ?? state.iterateStreamingMessageId,
+      grokStreamingTranscript: innerState.grokStreamingTranscript ?? state.grokStreamingTranscript,
+      grokAudioChunks: innerState.grokAudioChunks ?? state.grokAudioChunks,
     };
   }
 
@@ -214,6 +263,48 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
         openCodeMessageIndexes: innerState.messageIndexes ?? state.openCodeMessageIndexes,
       });
     }
+  }
+
+  // Handle iterate LLM response events directly (payload is the SSE event itself)
+  if (type === ITERATE_LLM_EVENT) {
+    const innerState = innerIterateReducer(
+      {
+        feed: state.feed as IterateFeedItem[],
+        isStreaming: state.isStreaming,
+        streamingMessage: state.streamingMessage,
+        activeTools: state.activeTools,
+        messageIndexes: state.iterateMessageIndexes,
+        streamingText: state.iterateStreamingText,
+        streamingMessageId: state.iterateStreamingMessageId,
+      },
+      event as Parameters<typeof innerIterateReducer>[1],
+    );
+    return insertEventItem({
+      ...(innerState as typeof innerState & { feed: InnerFeedItem[] }),
+      iterateMessageIndexes: innerState.messageIndexes ?? state.iterateMessageIndexes,
+      iterateStreamingText: innerState.streamingText ?? state.iterateStreamingText,
+      iterateStreamingMessageId: innerState.streamingMessageId,
+    });
+  }
+
+  // Handle Grok voice events
+  if (type === GROK_EVENT) {
+    const innerState = innerGrokReducer(
+      {
+        feed: state.feed as GrokFeedItem[],
+        isStreaming: state.isStreaming,
+        streamingMessage: state.streamingMessage,
+        activeTools: state.activeTools,
+        streamingTranscript: state.grokStreamingTranscript,
+        audioChunks: state.grokAudioChunks,
+      },
+      event as Parameters<typeof innerGrokReducer>[1],
+    );
+    return insertEventItem({
+      ...(innerState as typeof innerState & { feed: InnerFeedItem[] }),
+      grokStreamingTranscript: innerState.streamingTranscript,
+      grokAudioChunks: innerState.audioChunks,
+    });
   }
 
   // User message action → create both EventFeedItem (for raw display) and MessageFeedItem

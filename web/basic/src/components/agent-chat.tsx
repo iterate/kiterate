@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { CodeIcon, MessageCircleIcon, AlertCircleIcon } from "lucide-react";
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
   wrapperReducer,
   createInitialWrapperState,
+  grokPlayAudio,
   type WrapperState,
   type FeedItem,
   type EventFeedItem,
@@ -148,6 +149,20 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   );
   const jsonInput = useJsonInput(jsonTemplate);
 
+  // Handle live events - play audio when Grok response completes
+  const handleLiveEvent = useCallback(
+    (event: { type: string; payload?: { type?: string } }, state: WrapperState) => {
+      // Check if this is a Grok response.done event
+      if (event.type === "grok:event" && event.payload?.type === "response.done") {
+        // Play accumulated audio chunks
+        if (state.grokAudioChunks.length > 0) {
+          grokPlayAudio(state.grokAudioChunks);
+        }
+      }
+    },
+    [],
+  );
+
   const {
     state: { feed, isStreaming: stateIsStreaming, streamingMessage, rawEvents },
     isStreaming: hookIsStreaming,
@@ -158,6 +173,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     reducer: wrapperReducer,
     initialState: createInitialWrapperState(),
     suspense: false,
+    onLiveEvent: handleLiveEvent,
   });
 
   const isStreaming = stateIsStreaming || hookIsStreaming;
