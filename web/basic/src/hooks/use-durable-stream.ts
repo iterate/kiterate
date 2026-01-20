@@ -243,10 +243,17 @@ export function useDurableStream<TState, TEvent extends StreamEvent>({
         if (cancelled) return;
         if (!res.ok) throw new Error(`Catchup failed: ${res.status}`);
 
-        // Parse NDJSON response
+        // Parse SSE response (server returns SSE format even for non-live)
         const text = await res.text();
-        const lines = text.trim().split("\n").filter(Boolean);
-        const events: TEvent[] = lines.map((line) => JSON.parse(line));
+        const events: TEvent[] = [];
+        // SSE format: "event: data\ndata: {...json...}\n\n"
+        for (const block of text.split("\n\n")) {
+          const dataLine = block.split("\n").find((line) => line.startsWith("data: "));
+          if (dataLine) {
+            const json = dataLine.slice(6); // Remove "data: " prefix
+            events.push(JSON.parse(json));
+          }
+        }
 
         if (events.length > 0) {
           console.log(`[durable-stream] Catchup: ${events.length} events`);

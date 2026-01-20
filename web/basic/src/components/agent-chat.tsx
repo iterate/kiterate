@@ -43,21 +43,21 @@ export interface AgentChatProps {
   onConnectionStatusChange?: (status: ConnectionStatus) => void;
 }
 
-/** Generate a stable key for feed items - no index to avoid key shifts */
-function getFeedItemKey(item: FeedItem): string {
+/** Generate a stable key for feed items - include index for uniqueness */
+function getFeedItemKey(item: FeedItem, index: number): string {
   switch (item.kind) {
     case "message":
-      return `msg-${item.role}-${item.timestamp}`;
+      return `msg-${item.role}-${item.timestamp}-${index}`;
     case "error":
-      return `err-${item.timestamp}`;
+      return `err-${item.timestamp}-${index}`;
     case "event":
-      return `evt-${item.eventType}-${item.timestamp}`;
+      return `evt-${item.eventType}-${item.timestamp}-${index}`;
     case "grouped-event":
       return `grp-${item.eventType}-${item.firstTimestamp}-${item.lastTimestamp}`;
     case "tool":
       return `tool-${item.toolCallId}-${item.startTimestamp}`;
     default:
-      return `unknown-${Date.now()}`;
+      return `unknown-${Date.now()}-${index}`;
   }
 }
 
@@ -279,8 +279,8 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             )
           ) : (
             <>
-              {displayFeed?.map((item) => (
-                <FeedItemRenderer key={getFeedItemKey(item)} item={item} />
+              {displayFeed?.map((item, index) => (
+                <FeedItemRenderer key={getFeedItemKey(item, index)} item={item} />
               ))}
               {streamingMessage && (
                 <FeedItemRenderer key="streaming" item={streamingMessage} isStreaming />

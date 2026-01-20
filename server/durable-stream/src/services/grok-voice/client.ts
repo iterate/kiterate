@@ -65,6 +65,19 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
         let ws: WebSocket | null = null;
         let isConfigured = false;
 
+        /** Log a message being sent to Grok, redacting audio blobs */
+        const logSend = (msg: unknown) => {
+          const redacted = JSON.parse(
+            JSON.stringify(msg, (key, value) => {
+              if (key === "audio" && typeof value === "string" && value.length > 100) {
+                return "<SOUND_BLOB>";
+              }
+              return value;
+            }),
+          );
+          console.log("[grok-ws] ->", JSON.stringify(redacted));
+        };
+
         const sendSessionConfig = (socket: WebSocket) => {
           const sessionConfig = {
             type: "session.update",
@@ -85,6 +98,7 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
               },
             },
           };
+          logSend(sessionConfig);
           socket.send(JSON.stringify(sessionConfig));
           isConfigured = true;
         };
@@ -129,12 +143,12 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
         const send = (audio: Buffer): Effect.Effect<void> =>
           Effect.sync(() => {
             if (ws?.readyState === WebSocket.OPEN) {
-              ws.send(
-                JSON.stringify({
-                  type: "input_audio_buffer.append",
-                  audio: audio.toString("base64"),
-                }),
-              );
+              const msg = {
+                type: "input_audio_buffer.append",
+                audio: audio.toString("base64"),
+              };
+              logSend(msg);
+              ws.send(JSON.stringify(msg));
             }
           });
 
@@ -142,18 +156,20 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
           Effect.sync(() => {
             if (ws?.readyState === WebSocket.OPEN) {
               // Create conversation item
-              ws.send(
-                JSON.stringify({
-                  type: "conversation.item.create",
-                  item: {
-                    type: "message",
-                    role: "user",
-                    content: [{ type: "input_text", text }],
-                  },
-                }),
-              );
+              const createMsg = {
+                type: "conversation.item.create",
+                item: {
+                  type: "message",
+                  role: "user",
+                  content: [{ type: "input_text", text }],
+                },
+              };
+              logSend(createMsg);
+              ws.send(JSON.stringify(createMsg));
               // Trigger response
-              ws.send(JSON.stringify({ type: "response.create" }));
+              const responseMsg = { type: "response.create" };
+              logSend(responseMsg);
+              ws.send(JSON.stringify(responseMsg));
             }
           });
 
