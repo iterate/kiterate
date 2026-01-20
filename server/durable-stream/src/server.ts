@@ -11,7 +11,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer, Schema, Stream } from "effect";
 
 import { EventInput, Offset, StreamPath } from "./domain.js";
-import * as StreamManager from "./services/stream-manager/index.js";
+import * as AgentManager from "./services/agent-manager/index.js";
 import * as Sse from "./Sse.js";
 
 // GET /agents/* -> SSE stream
@@ -28,7 +28,7 @@ const subscribeHandler = Effect.gen(function* () {
   const from = offsetParam ? Offset.make(offsetParam) : undefined;
   const live = liveParam === "sse" || liveParam === "true";
 
-  const manager = yield* StreamManager.StreamManager;
+  const manager = yield* AgentManager.AgentManager;
   const stream = manager
     .subscribe({ path, ...(from && { from }), live })
     .pipe(Stream.map(Sse.data));
@@ -44,7 +44,7 @@ const appendHandler = Effect.gen(function* () {
   const body = yield* req.json;
   const event = yield* Schema.decodeUnknown(EventInput)(body);
 
-  const manager = yield* StreamManager.StreamManager;
+  const manager = yield* AgentManager.AgentManager;
   yield* manager.append({ path, event });
 
   return HttpServerResponse.empty({ status: 204 });

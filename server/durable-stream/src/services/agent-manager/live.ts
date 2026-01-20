@@ -68,3 +68,27 @@ export const liveLayer: Layer.Layer<
   never,
   StreamManager | LanguageModel.LanguageModel
 > = Layer.effect(AgentManager, make);
+
+// -------------------------------------------------------------------------------------
+// Test layer - no LLM, just delegates to StreamManager
+// -------------------------------------------------------------------------------------
+
+const makeTest = Effect.gen(function* () {
+  const streamManager = yield* StreamManager;
+
+  const subscribe = (input: { path: StreamPath; from?: Offset; live?: boolean }) =>
+    streamManager.subscribe(input);
+
+  const append = (input: { path: StreamPath; event: EventInput }) =>
+    streamManager
+      .append(input)
+      .pipe(Effect.mapError((cause) => AgentManagerError.make({ operation: "append", cause })));
+
+  return AgentManager.of({ subscribe, append });
+});
+
+/** Test layer - no LLM integration, just delegates to StreamManager */
+export const testLayer: Layer.Layer<AgentManager, never, StreamManager> = Layer.effect(
+  AgentManager,
+  makeTest,
+);

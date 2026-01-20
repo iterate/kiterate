@@ -4,12 +4,14 @@ import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
 import { AppLive } from "./server.js";
-import { liveLayer as streamManagerLiveLayer } from "./services/stream-manager/live.js";
+import * as AgentManager from "./services/agent-manager/index.js";
+import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
 
 const testLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(streamManagerLiveLayer),
+    Layer.provide(AgentManager.testLayer),
+    Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),
   ),

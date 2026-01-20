@@ -5,5 +5,5 @@
 // Re-export service definition
 export { AgentManager, AgentManagerError } from "./service.js";
 
-// Re-export layer
-export { liveLayer } from "./live.js";
+// Re-export layers
+export { liveLayer, testLayer } from "./live.js";
