@@ -1,83 +1,21 @@
 /**
  * Durable Stream Manager - Event streaming with replay support
  *
- * Unlike StreamManager which only supports live subscribers, DurableStreamManager
- * stores event history and supports:
+ * Stores event history and supports:
  *   - Full replay for late subscribers
- *   - Offset-based subscription (fromSeq)
- *
- * Current implementation uses in-memory storage. Can be extended with
- * persistent backends (file, database) via DurableStorage abstraction.
+ *   - Offset-based subscription
+ *   - Pluggable storage backends via StreamStorageService
  */
 
-import { Effect, Schema, Context, Stream, Layer, PubSub, Chunk } from "effect";
+import { Chunk, Context, Effect, Layer, PubSub, Stream } from "effect";
 
-// -------------------------------------------------------------------------------------
-// Types
-// -------------------------------------------------------------------------------------
+import { Event, Offset, Payload, StreamPath } from "./domain.js";
+import { InMemoryLayer as InMemoryStreamStorage } from "./services/stream-storage/InMemory.js";
+import { StreamStorage, StreamStorageService } from "./services/stream-storage/index.js";
 
-export const StreamPath = Schema.String.pipe(Schema.brand("StreamPath"));
-export type StreamPath = typeof StreamPath.Type;
-
-export const Offset = Schema.String.pipe(Schema.brand("Offset"));
-export type Offset = typeof Offset.Type;
-
-export const Payload = Schema.Record({ key: Schema.String, value: Schema.Unknown });
-export type Payload = typeof Payload.Type;
-
-export class Event extends Schema.Class<Event>("Event")({
-  offset: Offset,
-  payload: Payload,
-}) {}
-
-// -------------------------------------------------------------------------------------
-// StreamStorage - pluggable storage backend
-// -------------------------------------------------------------------------------------
-
-export interface StreamStorage {
-  /** Append payload to stream, assign offset, store, and return the event */
-  readonly append: (input: { path: StreamPath; payload: Payload }) => Effect.Effect<Event>;
-  /** Read events from stream as a stream, optionally starting from an offset */
-  readonly read: (input: { path: StreamPath; from?: Offset }) => Stream.Stream<Event>;
-}
-
-export class StreamStorageService extends Context.Tag("@app/StreamStorageService")<
-  StreamStorageService,
-  StreamStorage
->() {
-  static InMemory: Layer.Layer<StreamStorageService> = Layer.sync(StreamStorageService, () => {
-    const streams = new Map<StreamPath, { events: Event[]; nextOffset: number }>();
-
-    const getOrCreateStream = (path: StreamPath) => {
-      let stream = streams.get(path);
-      if (!stream) {
-        stream = { events: [], nextOffset: 0 };
-        streams.set(path, stream);
-      }
-      return stream;
-    };
-
-    const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
-
-    return {
-      append: ({ path, payload }) =>
-        Effect.sync(() => {
-          const stream = getOrCreateStream(path);
-          const offset = formatOffset(stream.nextOffset++);
-          const event = Event.make({ offset, payload });
-          stream.events.push(event);
-          return event;
-        }),
-      read: ({ path, from }) =>
-        Stream.suspend(() => {
-          const stream = getOrCreateStream(path);
-          const events =
-            from !== undefined ? stream.events.filter((e) => e.offset >= from) : stream.events;
-          return Stream.fromIterable(events);
-        }),
-    };
-  });
-}
+// Re-export types for convenience
+export { Event, Offset, Payload, StreamPath, StreamStorageService };
+export type { StreamStorage };
 
 // -------------------------------------------------------------------------------------
 // DurableIterateStream - single stream with history and replay
@@ -193,7 +131,7 @@ const DurableStreamManagerLive: Layer.Layer<DurableStreamManager, never, StreamS
   );
 
 export const InMemoryDurableStreamManager: Layer.Layer<DurableStreamManager> =
-  DurableStreamManagerLive.pipe(Layer.provide(StreamStorageService.InMemory));
+  DurableStreamManagerLive.pipe(Layer.provide(InMemoryStreamStorage));
 
 // -------------------------------------------------------------------------------------
 // In-source tests
