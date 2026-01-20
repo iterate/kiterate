@@ -45,7 +45,7 @@ describe("Durable Stream Server", () => {
       const client = yield* HttpClient.HttpClient;
       const response = yield* client.execute(
         HttpClientRequest.post("/agents/test/stream").pipe(
-          HttpClientRequest.bodyUnsafeJson({ type: "test", msg: "hello" }),
+          HttpClientRequest.bodyUnsafeJson({ type: "test", payload: { msg: "hello" } }),
         ),
       );
       expect(response.status).toBe(204);
@@ -57,7 +57,7 @@ describe("Durable Stream Server", () => {
     Effect.gen(function* () {
       const fiber = yield* subscribe("/agents/chat/room1");
       yield* Effect.sleep("10 millis");
-      yield* post("/agents/chat/room1", { type: "message", text: "Hello SSE!" });
+      yield* post("/agents/chat/room1", { type: "message", payload: { text: "Hello SSE!" } });
 
       const chunks = yield* fiber;
       const data = Chunk.toReadonlyArray(chunks).join("");
@@ -72,7 +72,7 @@ describe("Durable Stream Server", () => {
       const sub1 = yield* subscribe("/agents/broadcast/chan");
       const sub2 = yield* subscribe("/agents/broadcast/chan");
       yield* Effect.sleep("10 millis");
-      yield* post("/agents/broadcast/chan", { msg: "broadcast" });
+      yield* post("/agents/broadcast/chan", { type: "broadcast", payload: { msg: "broadcast" } });
 
       const chunks1 = yield* sub1;
       const chunks2 = yield* sub2;
@@ -87,7 +87,7 @@ describe("Durable Stream Server", () => {
       const subA = yield* subscribe("/agents/path/a");
       const subB = yield* subscribe("/agents/path/b");
       yield* Effect.sleep("10 millis");
-      yield* post("/agents/path/a", { source: "A" });
+      yield* post("/agents/path/a", { type: "test", payload: { source: "A" } });
 
       const dataA = Chunk.toReadonlyArray(yield* subA).join("");
       expect(dataA).toContain("source");

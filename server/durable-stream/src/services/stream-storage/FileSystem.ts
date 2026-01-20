@@ -6,16 +6,13 @@
  */
 import * as Fs from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { DateTime, Effect, Layer, Schema, Stream } from "effect";
 
-import { Event, Offset, Payload, StreamPath } from "../../domain.js";
+import { Event, EventInput, Offset, StreamPath, Version } from "../../domain.js";
 import { StreamStorage, StreamStorageError, StreamStorageTypeId } from "./service.js";
 
-// Schema for stored event format (raw strings, not branded)
-const StoredEvent = Schema.Struct({
-  offset: Schema.String,
-  payload: Payload,
-});
+// JSON <-> Event schema: string encoded, Event type
+const JsonEvent = Schema.parseJson(Event);
 
 export const fileSystemLayer = (
   basePath: string,
@@ -51,20 +48,19 @@ export const fileSystemLayer = (
 
       return StreamStorage.of({
         [StreamStorageTypeId]: StreamStorageTypeId,
-        append: ({ path: streamPath, payload }: { path: StreamPath; payload: Payload }) =>
+        append: ({ path: streamPath, event: input }: { path: StreamPath; event: EventInput }) =>
           Effect.gen(function* () {
             const filePath = getFilePath(streamPath);
 
             // Get and increment offset
             const nextOffset = yield* readOffsetFile(streamPath);
             const offset = formatOffset(nextOffset);
-            const event = Event.make({ offset, payload });
+            const createdAt = yield* DateTime.now;
+            const version = input.version ?? Version.make("1");
+            const event = Event.make({ ...input, offset, createdAt, version });
 
-            // Append event as JSON line using Schema
-            const encoded = yield* Schema.encode(Schema.parseJson(StoredEvent))({
-              offset,
-              payload,
-            });
+            // Encode Event to JSON string
+            const encoded = yield* Schema.encode(JsonEvent)(event);
             const line = encoded + "\n";
             yield* fs.writeFile(filePath, new TextEncoder().encode(line), { flag: "a" });
 
@@ -87,18 +83,9 @@ export const fileSystemLayer = (
               const content = yield* fs.readFileString(filePath);
               const lines = content.trim().split("\n").filter(Boolean);
 
-              const decodeStoredEvent = Schema.decodeUnknown(Schema.parseJson(StoredEvent));
+              // Decode JSON strings to Events
               const events = yield* Effect.all(
-                lines.map((line) =>
-                  decodeStoredEvent(line).pipe(
-                    Effect.map((parsed) =>
-                      Event.make({
-                        offset: Offset.make(parsed.offset),
-                        payload: parsed.payload,
-                      }),
-                    ),
-                  ),
-                ),
+                lines.map((line) => Schema.decodeUnknown(JsonEvent)(line)),
               );
 
               const filtered = from !== undefined ? events.filter((e) => e.offset >= from) : events;

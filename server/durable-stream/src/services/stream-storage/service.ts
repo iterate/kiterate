@@ -3,7 +3,7 @@
  */
 import { Context, Effect, Schema, Stream } from "effect";
 
-import { Event, Offset, Payload, StreamPath } from "../../domain.js";
+import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 
 // -------------------------------------------------------------------------------------
 // Type ID (for nominal uniqueness)
@@ -29,10 +29,10 @@ export class StreamStorageError extends Schema.TaggedError<StreamStorageError>()
 
 export interface StreamStorage {
   readonly [StreamStorageTypeId]: StreamStorageTypeId;
-  /** Append payload to stream, assign offset, store, and return the event */
+  /** Append event input to stream, assign offset + createdAt, store, and return the event */
   readonly append: (input: {
     path: StreamPath;
-    payload: Payload;
+    event: EventInput;
   }) => Effect.Effect<Event, StreamStorageError>;
   /** Read events from stream as a stream, optionally starting from an offset */
   readonly read: (input: {

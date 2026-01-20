@@ -4,7 +4,7 @@
 import { LanguageModel } from "@effect/ai";
 import { Effect, Layer, Option, Stream } from "effect";
 
-import type { Offset, Payload, StreamPath } from "../../domain.js";
+import { EventInput, EventType, type Offset, type StreamPath } from "../../domain.js";
 import { StreamManager } from "../stream-manager/service.js";
 import { AgentManager, AgentManagerError } from "./service.js";
 
@@ -17,9 +17,9 @@ const make = Effect.gen(function* () {
   // -------------------------------------------------------------------------------------
 
   /** Returns the prompt if generation should be triggered, None otherwise */
-  const getGenerationPrompt = (payload: Payload): Option.Option<string> => {
-    if (payload["role"] === "user" && payload["generate"] !== false) {
-      return Option.some(String(payload["content"] ?? ""));
+  const getGenerationPrompt = (event: EventInput): Option.Option<string> => {
+    if (event.payload["role"] === "user" && event.payload["generate"] !== false) {
+      return Option.some(String(event.payload["content"] ?? ""));
     }
     return Option.none();
   };
@@ -34,12 +34,18 @@ const make = Effect.gen(function* () {
           if (part.type === "text-delta") {
             yield* streamManager.append({
               path,
-              payload: { role: "assistant", type: "text", content: part.delta },
+              event: EventInput.make({
+                type: EventType.make("assistant.text"),
+                payload: { role: "assistant", type: "text", content: part.delta },
+              }),
             });
           } else if (part.type === "finish") {
             yield* streamManager.append({
               path,
-              payload: { role: "assistant", type: "finish", reason: part.reason },
+              event: EventInput.make({
+                type: EventType.make("assistant.finish"),
+                payload: { role: "assistant", type: "finish", reason: part.reason },
+              }),
             });
           }
           // Ignore other streaming part types (text-start, text-end, reasoning-*, etc.)
@@ -55,11 +61,11 @@ const make = Effect.gen(function* () {
   const subscribe = (input: { path: StreamPath; from?: Offset; live?: boolean }) =>
     streamManager.subscribe(input);
 
-  const append = (input: { path: StreamPath; payload: Payload }) =>
+  const append = (input: { path: StreamPath; event: EventInput }) =>
     Effect.gen(function* () {
       yield* streamManager.append(input);
 
-      const prompt = getGenerationPrompt(input.payload);
+      const prompt = getGenerationPrompt(input.event);
       if (Option.isSome(prompt)) {
         yield* appendLlmResponse(input.path, prompt.value);
       }

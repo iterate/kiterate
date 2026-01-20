@@ -10,7 +10,7 @@ import {
 import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer, Schema, Stream } from "effect";
 
-import { Payload, StreamPath } from "./domain.js";
+import { EventInput, StreamPath } from "./domain.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as Sse from "./Sse.js";
 
@@ -32,10 +32,10 @@ const appendHandler = Effect.gen(function* () {
   const rawPath = req.url.replace(/^\/agents\//, "");
   const path = StreamPath.make(rawPath);
   const body = yield* req.json;
-  const payload = yield* Schema.decodeUnknown(Payload)(body);
+  const event = yield* Schema.decodeUnknown(EventInput)(body);
 
   const manager = yield* StreamManager.StreamManager;
-  yield* manager.append({ path, payload });
+  yield* manager.append({ path, event });
 
   return HttpServerResponse.empty({ status: 204 });
 }).pipe(

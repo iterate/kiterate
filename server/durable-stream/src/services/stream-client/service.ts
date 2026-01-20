@@ -3,7 +3,7 @@
  */
 import { Context, Effect, Schema, Stream } from "effect";
 
-import type { Event } from "../../domain.js";
+import type { Event, EventInput } from "../../domain.js";
 
 // -------------------------------------------------------------------------------------
 // Errors
@@ -30,9 +30,6 @@ export class StreamClient extends Context.Tag("@app/StreamClient")<
   StreamClient,
   {
     readonly subscribe: (path: string) => Stream.Stream<Event, StreamClientError>;
-    readonly append: (
-      path: string,
-      event: Record<string, unknown>,
-    ) => Effect.Effect<void, StreamClientError>;
+    readonly append: (path: string, event: EventInput) => Effect.Effect<void, StreamClientError>;
   }
 >() {}

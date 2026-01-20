@@ -5,6 +5,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Scope } from "effect";
 
+import { EventInput, EventType } from "./domain.js";
 import { AppLive } from "./server.js";
 import * as StreamClient from "./services/stream-client/index.js";
 import { liveLayer as streamManagerLiveLayer } from "./services/stream-manager/live.js";
@@ -35,7 +36,13 @@ describe("StreamClient", () => {
       const client = yield* StreamClient.StreamClient;
       const { take } = yield* subscribeClient("test/roundtrip");
 
-      yield* client.append("test/roundtrip", { message: "hello from client" });
+      yield* client.append(
+        "test/roundtrip",
+        EventInput.make({
+          type: EventType.make("test"),
+          payload: { message: "hello from client" },
+        }),
+      );
 
       const event = yield* take;
       expect(event.payload["message"]).toBe("hello from client");
@@ -48,9 +55,18 @@ describe("StreamClient", () => {
       const client = yield* StreamClient.StreamClient;
       const { takeN } = yield* subscribeClient("test/sequence");
 
-      yield* client.append("test/sequence", { n: 1 });
-      yield* client.append("test/sequence", { n: 2 });
-      yield* client.append("test/sequence", { n: 3 });
+      yield* client.append(
+        "test/sequence",
+        EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+      );
+      yield* client.append(
+        "test/sequence",
+        EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+      );
+      yield* client.append(
+        "test/sequence",
+        EventInput.make({ type: EventType.make("test"), payload: { n: 3 } }),
+      );
 
       const events = yield* takeN(3);
       expect(events.map((e) => e.payload["n"])).toEqual([1, 2, 3]);
@@ -64,7 +80,10 @@ describe("StreamClient", () => {
       const subA = yield* subscribeClient("test/path/a");
       const subB = yield* subscribeClient("test/path/b");
 
-      yield* client.append("test/path/a", { source: "A" });
+      yield* client.append(
+        "test/path/a",
+        EventInput.make({ type: EventType.make("test"), payload: { source: "A" } }),
+      );
 
       const eventA = yield* subA.take;
       expect(eventA.payload["source"]).toBe("A");

@@ -3,7 +3,7 @@
  */
 import { Context, Effect, Stream } from "effect";
 
-import { Event, Offset, Payload, StreamPath } from "../../domain.js";
+import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorageError } from "../stream-storage/service.js";
 
 // -------------------------------------------------------------------------------------
@@ -15,7 +15,7 @@ export class StreamManager extends Context.Tag("@app/StreamManager")<
   {
     readonly append: (input: {
       path: StreamPath;
-      payload: Payload;
+      event: EventInput;
     }) => Effect.Effect<void, StreamStorageError>;
 
     readonly subscribe: (input: {

@@ -6,7 +6,7 @@ import { NodeContext } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
-import { Offset, StreamPath } from "../../domain.js";
+import { EventInput, EventType, Offset, StreamPath } from "../../domain.js";
 import * as StreamStorage from "./index.js";
 
 /**
@@ -22,7 +22,10 @@ const streamStorageTests = <E>(
         const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/append");
 
-        const event = yield* storage.append({ path, payload: { message: "hello" } });
+        const event = yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { message: "hello" } }),
+        });
 
         expect(event.offset).toBe("0000000000000000");
         expect(event.payload).toEqual({ message: "hello" });
@@ -34,9 +37,18 @@ const streamStorageTests = <E>(
         const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/increment");
 
-        const e1 = yield* storage.append({ path, payload: { n: 1 } });
-        const e2 = yield* storage.append({ path, payload: { n: 2 } });
-        const e3 = yield* storage.append({ path, payload: { n: 3 } });
+        const e1 = yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        const e2 = yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+        });
+        const e3 = yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 3 } }),
+        });
 
         expect(e1.offset).toBe("0000000000000000");
         expect(e2.offset).toBe("0000000000000001");
@@ -49,9 +61,18 @@ const streamStorageTests = <E>(
         const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/read");
 
-        yield* storage.append({ path, payload: { n: 1 } });
-        yield* storage.append({ path, payload: { n: 2 } });
-        yield* storage.append({ path, payload: { n: 3 } });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+        });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 3 } }),
+        });
 
         const events = yield* storage.read({ path }).pipe(Stream.runCollect);
         const arr = Chunk.toReadonlyArray(events);
@@ -66,9 +87,18 @@ const streamStorageTests = <E>(
         const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/filter");
 
-        yield* storage.append({ path, payload: { n: 0 } });
-        yield* storage.append({ path, payload: { n: 1 } });
-        yield* storage.append({ path, payload: { n: 2 } });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 0 } }),
+        });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+        });
 
         const events = yield* storage
           .read({ path, from: Offset.make("0000000000000001") })
@@ -98,8 +128,14 @@ const streamStorageTests = <E>(
         const pathA = StreamPath.make("test/a");
         const pathB = StreamPath.make("test/b");
 
-        yield* storage.append({ path: pathA, payload: { source: "A" } });
-        yield* storage.append({ path: pathB, payload: { source: "B" } });
+        yield* storage.append({
+          path: pathA,
+          event: EventInput.make({ type: EventType.make("test"), payload: { source: "A" } }),
+        });
+        yield* storage.append({
+          path: pathB,
+          event: EventInput.make({ type: EventType.make("test"), payload: { source: "B" } }),
+        });
 
         const eventsA = yield* storage.read({ path: pathA }).pipe(Stream.runCollect);
         const eventsB = yield* storage.read({ path: pathB }).pipe(Stream.runCollect);
@@ -115,9 +151,18 @@ const streamStorageTests = <E>(
         const pathA = StreamPath.make("test/offset-a");
         const pathB = StreamPath.make("test/offset-b");
 
-        const a1 = yield* storage.append({ path: pathA, payload: { n: 1 } });
-        const b1 = yield* storage.append({ path: pathB, payload: { n: 1 } });
-        const a2 = yield* storage.append({ path: pathA, payload: { n: 2 } });
+        const a1 = yield* storage.append({
+          path: pathA,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        const b1 = yield* storage.append({
+          path: pathB,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        const a2 = yield* storage.append({
+          path: pathA,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+        });
 
         // Both paths start at offset 0
         expect(a1.offset).toBe("0000000000000000");

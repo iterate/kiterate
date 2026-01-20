@@ -4,7 +4,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
-import { Offset, StreamPath } from "../../domain.js";
+import { EventInput, EventType, Offset, StreamPath } from "../../domain.js";
 import * as StreamStorage from "../stream-storage/index.js";
 import * as StreamManager from "./index.js";
 import { liveLayer } from "./live.js";
@@ -18,8 +18,14 @@ describe("StreamManager", () => {
       const path = StreamPath.make("test/durable");
 
       // Append events before subscribing
-      yield* manager.append({ path, payload: { message: "first" } });
-      yield* manager.append({ path, payload: { message: "second" } });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { message: "first" } }),
+      });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { message: "second" } }),
+      });
 
       // Late subscriber should get history
       const events = yield* manager.subscribe({ path }).pipe(Stream.take(2), Stream.runCollect);
@@ -39,9 +45,18 @@ describe("StreamManager", () => {
       const path = StreamPath.make("test/offset");
 
       // Append 3 events
-      yield* manager.append({ path, payload: { idx: 0 } });
-      yield* manager.append({ path, payload: { idx: 1 } });
-      yield* manager.append({ path, payload: { idx: 2 } });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
+      });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 1 } }),
+      });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 2 } }),
+      });
 
       // Subscribe from offset 1 (skip offset 0)
       const events = yield* manager
@@ -60,14 +75,17 @@ describe("StreamManager", () => {
       const path = StreamPath.make("test/historical-only");
 
       // Append historical event
-      yield* manager.append({ path, payload: { type: "historical" } });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { kind: "historical" } }),
+      });
 
       // Historical subscriber should complete after existing events
       const events = yield* manager.subscribe({ path }).pipe(Stream.runCollect);
 
       const arr = Chunk.toReadonlyArray(events);
       expect(arr).toHaveLength(1);
-      expect(arr[0].payload).toEqual({ type: "historical" });
+      expect(arr[0].payload).toEqual({ kind: "historical" });
     }).pipe(Effect.provide(testLayer)),
   );
 
@@ -77,7 +95,10 @@ describe("StreamManager", () => {
       const path = StreamPath.make("test/live-only");
 
       // Append historical event
-      yield* manager.append({ path, payload: { type: "historical" } });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { kind: "historical" } }),
+      });
 
       // Subscribe with live=true (live only)
       const subscriber = yield* manager
@@ -87,7 +108,10 @@ describe("StreamManager", () => {
       yield* Effect.sleep("1 millis");
 
       // Append live event
-      yield* manager.append({ path, payload: { type: "live" } });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { kind: "live" } }),
+      });
 
       const events = yield* subscriber;
       const arr = Chunk.toReadonlyArray(events);
@@ -95,7 +119,7 @@ describe("StreamManager", () => {
       // Should only have the live event, not historical
       expect(arr).toHaveLength(1);
       expect(arr[0].offset).toBe("0000000000000001");
-      expect(arr[0].payload).toEqual({ type: "live" });
+      expect(arr[0].payload).toEqual({ kind: "live" });
     }).pipe(Effect.provide(testLayer)),
   );
 });

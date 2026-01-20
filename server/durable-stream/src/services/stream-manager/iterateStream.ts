@@ -3,7 +3,7 @@
  */
 import { Effect, PubSub, Stream } from "effect";
 
-import { Event, Offset, Payload, StreamPath } from "../../domain.js";
+import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage, StreamStorageError } from "../stream-storage/service.js";
 
 // -------------------------------------------------------------------------------------
@@ -11,7 +11,7 @@ import { StreamStorage, StreamStorageError } from "../stream-storage/service.js"
 // -------------------------------------------------------------------------------------
 
 export interface IterateStream {
-  readonly append: (input: { payload: Payload }) => Effect.Effect<void, StreamStorageError>;
+  readonly append: (input: { event: EventInput }) => Effect.Effect<void, StreamStorageError>;
   /** Subscribe with optional offset. live=false (default) for historical only, live=true for live only */
   readonly subscribe: (options?: {
     from?: Offset;
@@ -31,9 +31,9 @@ export const make = (input: {
     const { storage, path } = input;
     const pubsub = yield* PubSub.unbounded<Event>();
 
-    const append = ({ payload }: { payload: Payload }) =>
+    const append = ({ event: eventInput }: { event: EventInput }) =>
       Effect.gen(function* () {
-        const event = yield* storage.append({ path, payload });
+        const event = yield* storage.append({ path, event: eventInput });
         yield* PubSub.publish(pubsub, event);
       });
 

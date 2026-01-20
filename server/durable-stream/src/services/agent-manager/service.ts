@@ -7,7 +7,7 @@
  */
 import { Context, Effect, Schema, Stream } from "effect";
 
-import { Event, Offset, Payload, StreamPath } from "../../domain.js";
+import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorageError } from "../stream-storage/service.js";
 
 // -------------------------------------------------------------------------------------
@@ -44,7 +44,7 @@ export class AgentManager extends Context.Tag("@app/AgentManager")<
      */
     readonly append: (input: {
       path: StreamPath;
-      payload: Payload;
+      event: EventInput;
     }) => Effect.Effect<void, AgentManagerError | StreamStorageError>;
   }
 >() {}

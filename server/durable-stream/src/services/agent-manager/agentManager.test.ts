@@ -5,7 +5,7 @@ import { LanguageModel, Response } from "@effect/ai";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
-import { StreamPath } from "../../domain.js";
+import { EventInput, EventType, StreamPath } from "../../domain.js";
 import { liveLayer as streamManagerLiveLayer } from "../stream-manager/live.js";
 import * as StreamStorage from "../stream-storage/index.js";
 import { AgentManager, liveLayer } from "./index.js";
@@ -42,7 +42,13 @@ describe("AgentManager", () => {
       const path = StreamPath.make("test/subscribe");
 
       // Append an event directly (without generate flag)
-      yield* agent.append({ path, payload: { message: "test", generate: false } });
+      yield* agent.append({
+        path,
+        event: EventInput.make({
+          type: EventType.make("user"),
+          payload: { message: "test", generate: false },
+        }),
+      });
 
       // Subscribe and collect
       const events = yield* agent.subscribe({ path }).pipe(Stream.runCollect);
@@ -59,7 +65,13 @@ describe("AgentManager", () => {
       const path = StreamPath.make("test/no-generate");
 
       // Append with generate: false
-      yield* agent.append({ path, payload: { role: "user", content: "hi", generate: false } });
+      yield* agent.append({
+        path,
+        event: EventInput.make({
+          type: EventType.make("user"),
+          payload: { role: "user", content: "hi", generate: false },
+        }),
+      });
 
       const events = yield* agent.subscribe({ path }).pipe(Stream.runCollect);
       const arr = Chunk.toReadonlyArray(events);
@@ -76,7 +88,13 @@ describe("AgentManager", () => {
       const path = StreamPath.make("test/generate");
 
       // Append user message (default behavior should trigger LLM)
-      yield* agent.append({ path, payload: { role: "user", content: "say hello" } });
+      yield* agent.append({
+        path,
+        event: EventInput.make({
+          type: EventType.make("user"),
+          payload: { role: "user", content: "say hello" },
+        }),
+      });
 
       const events = yield* agent.subscribe({ path }).pipe(Stream.runCollect);
       const arr = Chunk.toReadonlyArray(events);

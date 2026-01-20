@@ -3,7 +3,7 @@
  */
 import { Effect, Layer, Stream } from "effect";
 
-import { Offset, Payload, StreamPath } from "../../domain.js";
+import { EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
 import * as IterateStream from "./iterateStream.js";
 import { StreamManager } from "./service.js";
@@ -30,13 +30,13 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
 
     const append = Effect.fn("StreamManager.append")(function* ({
       path,
-      payload,
+      event,
     }: {
       path: StreamPath;
-      payload: Payload;
+      event: EventInput;
     }) {
       const stream = yield* getOrCreateStream(path);
-      yield* stream.append({ payload });
+      yield* stream.append({ event });
     });
 
     const subscribe = ({ path, from, live }: { path: StreamPath; from?: Offset; live?: boolean }) =>

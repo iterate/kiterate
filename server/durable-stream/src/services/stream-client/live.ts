@@ -4,7 +4,7 @@
 import { HttpClient, HttpClientRequest } from "@effect/platform";
 import { Effect, Layer, Stream } from "effect";
 
-import type { Event } from "../../domain.js";
+import type { Event, EventInput } from "../../domain.js";
 import { StreamClient, StreamClientConfig, StreamClientError } from "./service.js";
 
 // -------------------------------------------------------------------------------------
@@ -32,7 +32,7 @@ export const make = (config: StreamClientConfig) =>
         ),
       );
 
-    const append = (path: string, event: Record<string, unknown>) =>
+    const append = (path: string, event: EventInput) =>
       client
         .execute(
           HttpClientRequest.post(`${config.baseUrl}/agents/${path}`).pipe(
