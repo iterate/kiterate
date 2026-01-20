@@ -47,7 +47,7 @@ const make = Effect.gen(function* () {
   // Service methods
   // -------------------------------------------------------------------------------------
 
-  const subscribe = (input: { path: StreamPath; from?: Offset; live?: boolean }) =>
+  const subscribe = (input: { path: StreamPath; after?: Offset; live?: boolean }) =>
     streamManager.subscribe(input);
 
   const append = (input: { path: StreamPath; event: EventInput }) =>
@@ -76,7 +76,7 @@ export const liveLayer: Layer.Layer<
 const makeTest = Effect.gen(function* () {
   const streamManager = yield* StreamManager;
 
-  const subscribe = (input: { path: StreamPath; from?: Offset; live?: boolean }) =>
+  const subscribe = (input: { path: StreamPath; after?: Offset; live?: boolean }) =>
     streamManager.subscribe(input);
 
   const append = (input: { path: StreamPath; event: EventInput }) =>

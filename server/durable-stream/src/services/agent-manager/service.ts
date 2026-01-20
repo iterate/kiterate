@@ -34,7 +34,7 @@ export class AgentManager extends Context.Tag("@app/AgentManager")<
      */
     readonly subscribe: (input: {
       path: StreamPath;
-      from?: Offset;
+      after?: Offset;
       live?: boolean;
     }) => Stream.Stream<Event, StreamStorageError>;
 

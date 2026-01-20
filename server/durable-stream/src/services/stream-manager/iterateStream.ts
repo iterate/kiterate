@@ -14,11 +14,11 @@ export interface IterateStream {
   readonly append: (input: { event: EventInput }) => Effect.Effect<void, StreamStorageError>;
   /**
    * Subscribe to events on this stream.
-   * @param from - Last seen offset (exclusive). Returns events with offset > from.
+   * @param after - Last seen offset (exclusive). Returns events with offset > after.
    * @param live - If true, continues with live events after history. Default: false (history only).
    */
   readonly subscribe: (options?: {
-    from?: Offset;
+    after?: Offset;
     live?: boolean;
   }) => Stream.Stream<Event, StreamStorageError>;
 }
@@ -41,15 +41,15 @@ export const make = (input: {
         yield* PubSub.publish(pubsub, event);
       });
 
-    const subscribe = (options?: { from?: Offset; live?: boolean }) =>
+    const subscribe = (options?: { after?: Offset; live?: boolean }) =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
-          const from = options?.from ?? Offset.make("-1");
+          const after = options?.after ?? Offset.make("-1");
           const live = options?.live ?? false;
 
           if (!live) {
             // Historical only - no PubSub subscription
-            return storage.read({ path, from });
+            return storage.read({ path, after });
           }
 
           // Live mode: history + live with deduplication
@@ -57,8 +57,8 @@ export const make = (input: {
           const queue = yield* PubSub.subscribe(pubsub);
           const liveStream = Stream.fromQueue(queue);
 
-          const historicalStream = storage.read({ path, from });
-          const lastOffsetRef = yield* Ref.make<Offset>(from);
+          const historicalStream = storage.read({ path, after });
+          const lastOffsetRef = yield* Ref.make<Offset>(after);
 
           // Track last historical offset, then filter live to only new events
           const trackedHistorical = historicalStream.pipe(

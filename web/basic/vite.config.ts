@@ -3,6 +3,8 @@ import viteReact from "@vitejs/plugin-react";
 import viteTsConfigPaths from "vite-tsconfig-paths";
 import tailwindcss from "@tailwindcss/vite";
 
+const backendPort = process.env.BACKEND_PORT ?? "3001";
+
 const config = defineConfig({
   plugins: [
     viteTsConfigPaths({
@@ -14,7 +16,7 @@ const config = defineConfig({
   server: {
     proxy: {
       "/agents": {
-        target: "http://localhost:3001",
+        target: `http://localhost:${backendPort}`,
         changeOrigin: true,
         // Configure proxy for SSE (Server-Sent Events) streaming
         configure: (proxy, _options) => {

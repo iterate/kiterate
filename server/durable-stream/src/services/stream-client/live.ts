@@ -17,13 +17,13 @@ export const make = (config: StreamClientConfig) =>
 
     const subscribe = (input: {
       path: StreamPath;
-      from?: Offset;
+      after?: Offset;
       live?: boolean;
     }): Stream.Stream<Event, StreamClientError> =>
       Stream.unwrap(
         Effect.gen(function* () {
           const params = new URLSearchParams();
-          if (input.from) params.set("offset", input.from);
+          if (input.after) params.set("offset", input.after);
           if (input.live) params.set("live", "true");
           const query = params.toString();
           const url = query

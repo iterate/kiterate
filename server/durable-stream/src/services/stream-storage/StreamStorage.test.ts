@@ -102,7 +102,7 @@ const streamStorageTests = <E>(
 
         // from="0000000000000001" means "I've seen offset 1, give me what's after"
         const events = yield* storage
-          .read({ path, from: Offset.make("0000000000000001") })
+          .read({ path, after: Offset.make("0000000000000001") })
           .pipe(Stream.runCollect);
         const arr = Chunk.toReadonlyArray(events);
 

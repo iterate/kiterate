@@ -39,12 +39,20 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
       yield* stream.append({ event });
     });
 
-    const subscribe = ({ path, from, live }: { path: StreamPath; from?: Offset; live?: boolean }) =>
+    const subscribe = ({
+      path,
+      after,
+      live,
+    }: {
+      path: StreamPath;
+      after?: Offset;
+      live?: boolean;
+    }) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const stream = yield* getOrCreateStream(path);
           return stream.subscribe({
-            ...(from !== undefined && { from }),
+            ...(after !== undefined && { after }),
             ...(live !== undefined && { live }),
           });
         }).pipe(Effect.withSpan("StreamManager.subscribe")),

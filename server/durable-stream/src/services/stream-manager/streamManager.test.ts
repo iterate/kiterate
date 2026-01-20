@@ -60,7 +60,7 @@ describe("StreamManager", () => {
 
       // Subscribe with from=offset1 meaning "I've seen offset 1, give me what's after"
       const events = yield* manager
-        .subscribe({ path, from: Offset.make("0000000000000001") })
+        .subscribe({ path, after: Offset.make("0000000000000001") })
         .pipe(Stream.runCollect);
 
       const arr = Chunk.toReadonlyArray(events);
@@ -114,7 +114,7 @@ describe("StreamManager", () => {
 
       // Resubscribe with from=lastProcessedOffset (meaning "I've seen this, give me what's after")
       const secondBatch = yield* manager
-        .subscribe({ path, from: lastProcessedOffset })
+        .subscribe({ path, after: lastProcessedOffset })
         .pipe(Stream.runCollect);
       const secondArr = Chunk.toReadonlyArray(secondBatch);
 

@@ -31,12 +31,12 @@ export const inMemoryLayer: Layer.Layer<StreamStorage> = Layer.sync(StreamStorag
         stream.events.push(event);
         return event;
       }),
-    read: ({ path, from }) =>
+    read: ({ path, after }) =>
       Stream.suspend(() => {
         const stream = getOrCreateStream(path);
-        // from = last seen offset, so return events AFTER it (exclusive)
+        // after = last seen offset, so return events AFTER it (exclusive)
         const events =
-          from !== undefined ? stream.events.filter((e) => e.offset > from) : stream.events;
+          after !== undefined ? stream.events.filter((e) => e.offset > after) : stream.events;
         return Stream.fromIterable(events);
       }),
   });

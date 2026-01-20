@@ -70,7 +70,7 @@ export const fileSystemLayer = (
             return event;
           }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
 
-        read: ({ path: streamPath, from }: { path: StreamPath; from?: Offset }) =>
+        read: ({ path: streamPath, after }: { path: StreamPath; after?: Offset }) =>
           Stream.unwrap(
             Effect.gen(function* () {
               const filePath = getFilePath(streamPath);
@@ -88,8 +88,9 @@ export const fileSystemLayer = (
                 lines.map((line) => Schema.decodeUnknown(JsonEvent)(line)),
               );
 
-              // from = last seen offset, so return events AFTER it (exclusive)
-              const filtered = from !== undefined ? events.filter((e) => e.offset > from) : events;
+              // after = last seen offset, so return events AFTER it (exclusive)
+              const filtered =
+                after !== undefined ? events.filter((e) => e.offset > after) : events;
 
               return Stream.fromIterable(filtered);
             }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),

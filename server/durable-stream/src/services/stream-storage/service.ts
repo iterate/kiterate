@@ -36,12 +36,12 @@ export interface StreamStorage {
   }) => Effect.Effect<Event, StreamStorageError>;
   /**
    * Read events from stream.
-   * @param from - Last seen offset (exclusive). Returns events with offset > from.
-   *               Pass the last offset you processed to resume without duplicates.
+   * @param after - Last seen offset (exclusive). Returns events with offset > after.
+   *                Pass the last offset you processed to resume without duplicates.
    */
   readonly read: (input: {
     path: StreamPath;
-    from?: Offset;
+    after?: Offset;
   }) => Stream.Stream<Event, StreamStorageError>;
 }
 

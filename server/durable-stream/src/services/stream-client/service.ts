@@ -31,12 +31,12 @@ export class StreamClient extends Context.Tag("@app/StreamClient")<
   {
     /**
      * Subscribe to events on a stream.
-     * @param from - Last seen offset (exclusive). Returns events with offset > from.
+     * @param after - Last seen offset (exclusive). Returns events with offset > after.
      * @param live - If true, continues with live events after history. Default: false (history only).
      */
     readonly subscribe: (input: {
       path: StreamPath;
-      from?: Offset;
+      after?: Offset;
       live?: boolean;
     }) => Stream.Stream<Event, StreamClientError>;
 
