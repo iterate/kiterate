@@ -59,3 +59,46 @@ Never guess at Effect patterns - check the guide or `.reference/effect/` first.
   });
   export const liveLayer = Layer.effect(MyService, make);
   ```
+
+## Refactoring with ts-morph
+
+**When to use:** Renaming symbols (interfaces, classes, types, functions) that are referenced across multiple files. Don't bother for single-file edits or simple find/replace scenarios.
+
+**When renaming, rename everything:** interface/class, file name, namespace imports, and comments. Do it properly.
+
+**Pattern:** Write a temporary script at repo root, run with bun, delete after.
+
+```ts
+// refactor.ts
+import { Project } from "ts-morph";
+
+const project = new Project({
+  tsConfigFilePath: "./server/durable-stream/tsconfig.json", // target package
+});
+
+// Add source file and find the symbol to rename
+const sourceFile = project.addSourceFileAtPath(
+  "./server/durable-stream/src/services/stream-manager/oldName.ts",
+);
+
+// Rename interface/class/type (updates all references in project)
+const symbol = sourceFile.getInterfaceOrThrow("OldName");
+symbol.rename("NewName");
+
+// Rename the file
+sourceFile.move("newName.ts");
+
+await project.save();
+console.log("Done!");
+```
+
+```bash
+bun run refactor.ts && rm refactor.ts
+```
+
+**Notes:**
+
+- `rename()` is AST-aware and updates all references within the tsconfig's scope
+- Use `addSourceFileAtPath()` with paths relative to repo root
+- After ts-morph, manually update namespace imports and comments if needed
+- Always type-check after: `bunx tsc --noEmit -p path/to/tsconfig.json`
