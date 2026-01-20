@@ -116,8 +116,8 @@ export function createInitialWrapperState(): WrapperState {
 const PI_EVENT = "iterate:agent:harness:pi:event-received";
 const CLAUDE_EVENT = "iterate:agent:harness:claude:event-received";
 const OPENCODE_EVENT = "iterate:agent:harness:opencode:event-received";
-const ITERATE_LLM_EVENT = "iterate:llm:response:sse";
-const GROK_EVENT = "grok:event";
+const OPENAI_EVENT = "iterate:openai:response:sse";
+const GROK_EVENT = "iterate:grok:response:sse";
 const USER_MSG = "iterate:agent:action:send-user-message:called";
 const AGENT_ERROR = "iterate:agent:error";
 
@@ -266,7 +266,7 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
   }
 
   // Handle iterate LLM response events directly (payload is the SSE event itself)
-  if (type === ITERATE_LLM_EVENT) {
+  if (type === OPENAI_EVENT) {
     const innerState = innerIterateReducer(
       {
         feed: state.feed as IterateFeedItem[],

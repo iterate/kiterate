@@ -11,6 +11,8 @@ import { EventInput, type Offset, type StreamPath } from "../../domain.js";
 import { AiClient, AiModelType, PromptInput } from "../ai-client/index.js";
 import { StreamManager } from "./service.js";
 
+const DEFAULT_MODEL: AiModelType = "openai";
+
 // -------------------------------------------------------------------------------------
 // Agent Layer
 // -------------------------------------------------------------------------------------
@@ -19,20 +21,20 @@ const make = Effect.gen(function* () {
   const inner = yield* StreamManager;
   const aiClient = yield* AiClient;
 
-  // Per-path model selection: None = warmed up but not configured, Some = configured
-  const modelByPath = new Map<StreamPath, Option.Option<AiModelType>>();
+  // Per-path model selection (defaults to openai)
+  const modelByPath = new Map<StreamPath, AiModelType>();
 
-  /** Apply config change event to path state */
+  /** Apply config change event to path state. Returns true if config changed. */
   const applyConfig = (path: StreamPath, event: EventInput): boolean => {
     const configChange = AiModelType.fromEventInput(event);
     if (Option.isSome(configChange)) {
-      modelByPath.set(path, Option.some(configChange.value));
+      modelByPath.set(path, configChange.value);
       return true;
     }
     return false;
   };
 
-  /** Get model for path, warming up on first access. Returns None if not configured. */
+  /** Get model for path, warming up on first access. */
   const getModel = (path: StreamPath) =>
     Effect.gen(function* () {
       if (!modelByPath.has(path)) {
@@ -41,11 +43,11 @@ const make = Effect.gen(function* () {
           .subscribe({ path, live: false })
           .pipe(Stream.runForEach((event) => Effect.sync(() => applyConfig(path, event))));
         if (!modelByPath.has(path)) {
-          modelByPath.set(path, Option.none());
+          modelByPath.set(path, DEFAULT_MODEL);
         }
         yield* Effect.log(`Warmup complete for path: ${path}`);
       }
-      return modelByPath.get(path)!;
+      return modelByPath.get(path) ?? DEFAULT_MODEL;
     });
 
   const subscribe = (input: { path: StreamPath; after?: Offset; live?: boolean }) =>
@@ -64,13 +66,9 @@ const make = Effect.gen(function* () {
       const promptInput = PromptInput.fromEventInput(input.event);
       if (Option.isSome(promptInput)) {
         const model = yield* getModel(input.path);
-        if (Option.isNone(model)) {
-          yield* Effect.log(`No AI model configured for path, skipping generation`);
-          return;
-        }
-        yield* Effect.log(`Triggering ${model.value} AI generation...`);
+        yield* Effect.log(`Triggering ${model} AI generation...`);
         yield* aiClient
-          .prompt(model.value, input.path, promptInput.value)
+          .prompt(model, input.path, promptInput.value)
           .pipe(Stream.runForEach((event) => inner.append({ path: input.path, event })));
       }
     });

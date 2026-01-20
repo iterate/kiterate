@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { CodeIcon, MessageCircleIcon, AlertCircleIcon } from "lucide-react";
+import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon } from "lucide-react";
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
@@ -15,10 +15,26 @@ import {
 import { useDurableStream } from "@/hooks/use-durable-stream";
 import { useRawMode, type DisplayMode } from "@/hooks/use-raw-mode";
 import { useJsonInput } from "@/hooks/use-json-input";
-import { buildAgentURL, createMessageEvent, sendMessage, sendRawJson } from "@/lib/agent-api";
+import { useAudioRecorder } from "@/hooks/use-audio-recorder";
+import {
+  buildAgentURL,
+  createMessageEvent,
+  sendMessage,
+  sendRawJson,
+  sendAudio,
+  sendConfigEvent,
+  type AiModelType,
+} from "@/lib/agent-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -141,6 +157,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [sendError, setSendError] = useState<string | null>(null);
   const [selectedRawEventIndex, setSelectedRawEventIndex] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("message");
+  const [aiModel, setAiModel] = useState<AiModelType>("openai");
   const { displayMode, setRawEventsCount } = useRawMode();
 
   const jsonTemplate = useMemo(
@@ -149,11 +166,30 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   );
   const jsonInput = useJsonInput(jsonTemplate);
 
+  // Audio recording for voice input
+  const [audioState, audioControls] = useAudioRecorder();
+
+  // Handle push-to-talk
+  const handleMicMouseDown = useCallback(() => {
+    audioControls.startRecording();
+  }, [audioControls]);
+
+  const handleMicMouseUp = useCallback(async () => {
+    const audioBase64 = await audioControls.stopRecording();
+    if (audioBase64) {
+      console.log(`[audio] Sending ${audioBase64.length} bytes of audio`);
+      const result = await sendAudio(apiURL, agentPath, audioBase64);
+      if (!result.ok) {
+        setSendError(result.error ?? "Failed to send audio");
+      }
+    }
+  }, [audioControls, apiURL, agentPath]);
+
   // Handle live events - play audio when Grok response completes
   const handleLiveEvent = useCallback(
     (event: { type: string; payload?: { type?: string } }, state: WrapperState) => {
       // Check if this is a Grok response.done event
-      if (event.type === "grok:event" && event.payload?.type === "response.done") {
+      if (event.type === "iterate:grok:response:sse" && event.payload?.type === "response.done") {
         // Play accumulated audio chunks
         if (state.grokAudioChunks.length > 0) {
           grokPlayAudio(state.grokAudioChunks);
@@ -211,6 +247,20 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
       jsonInput.reset(jsonTemplate);
     }
     setSendError(null);
+  };
+
+  // Handle AI model change
+  const handleModelChange = async (model: AiModelType) => {
+    setAiModel(model);
+    setSendError(null);
+    try {
+      const result = await sendConfigEvent(apiURL, agentPath, model);
+      if (!result.ok) {
+        setSendError(result.error ?? `Failed to switch to ${model}`);
+      }
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Failed to switch model");
+    }
   };
 
   const handleSubmit = async ({ text }: { text: string }) => {
@@ -308,20 +358,31 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
           </div>
         )}
 
-        {/* Mode toggle and status */}
+        {/* Mode toggle, model selector, and status */}
         <div className="flex items-center justify-between">
-          <Tabs value={inputMode} onValueChange={handleModeChange}>
-            <TabsList className="h-8">
-              <TabsTrigger value="message" className="text-xs gap-1 px-2">
-                <MessageCircleIcon className="size-3" />
-                Message
-              </TabsTrigger>
-              <TabsTrigger value="json" className="text-xs gap-1 px-2">
-                <CodeIcon className="size-3" />
-                JSON
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center gap-3">
+            <Tabs value={inputMode} onValueChange={handleModeChange}>
+              <TabsList className="h-8">
+                <TabsTrigger value="message" className="text-xs gap-1 px-2">
+                  <MessageCircleIcon className="size-3" />
+                  Message
+                </TabsTrigger>
+                <TabsTrigger value="json" className="text-xs gap-1 px-2">
+                  <CodeIcon className="size-3" />
+                  JSON
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Select value={aiModel} onValueChange={(v) => handleModelChange(v as AiModelType)}>
+              <SelectTrigger className="h-8 w-[110px] text-xs">
+                <SelectValue placeholder="Model" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="openai">OpenAI</SelectItem>
+                <SelectItem value="grok">Grok</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex items-center gap-2">
             {isStreaming && (
               <div className="flex items-center gap-2">
@@ -339,7 +400,44 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
           <PromptInput onSubmit={handleSubmit} className="relative">
             <PromptInputTextarea placeholder="Type a message..." disabled={isDisabled} autoFocus />
             <PromptInputFooter>
-              <PromptInputTools />
+              <div className="flex items-center gap-2">
+                <PromptInputTools />
+                {audioState.isSupported && (
+                  <>
+                    {audioState.devices.length > 1 && (
+                      <Select
+                        value={audioState.selectedDeviceId ?? undefined}
+                        onValueChange={audioControls.selectDevice}
+                      >
+                        <SelectTrigger className="h-8 w-[140px] text-xs">
+                          <SelectValue placeholder="Microphone" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {audioState.devices.map((device) => (
+                            <SelectItem key={device.deviceId} value={device.deviceId}>
+                              {device.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    <Button
+                      variant={audioState.isRecording ? "destructive" : "ghost"}
+                      size="icon"
+                      className="size-8"
+                      onMouseDown={handleMicMouseDown}
+                      onMouseUp={handleMicMouseUp}
+                      onMouseLeave={handleMicMouseUp}
+                      onTouchStart={handleMicMouseDown}
+                      onTouchEnd={handleMicMouseUp}
+                      disabled={isDisabled}
+                      title="Hold to record audio"
+                    >
+                      <MicIcon className="size-4" />
+                    </Button>
+                  </>
+                )}
+              </div>
               <PromptInputSubmit
                 disabled={isDisabled}
                 {...(sending

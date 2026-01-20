@@ -16,7 +16,7 @@ export type { ContentBlock, MessageFeedItem, ToolFeedItem };
 // Event Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface IterateSSEPayload {
+interface IterateSSEPart {
   type: "response-metadata" | "text-start" | "text-delta" | "text-end" | "finish" | string;
   id?: string;
   delta?: string;
@@ -33,7 +33,7 @@ interface IterateSSEPayload {
 
 interface IterateEvent {
   type: string;
-  payload: IterateSSEPayload;
+  payload: { part: IterateSSEPart };
   createdAt?: string;
 }
 
@@ -94,13 +94,13 @@ function getTimestamp(event: IterateEvent): number {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function iterateReducer(state: IterateState, event: IterateEvent): IterateState {
-  const payload = event.payload;
-  if (!payload || typeof payload.type !== "string") return state;
+  const part = event.payload?.part;
+  if (!part || typeof part.type !== "string") return state;
 
   const now = getTimestamp(event);
   const messageIndexes = new Map(state.messageIndexes);
 
-  switch (payload.type) {
+  switch (part.type) {
     case "response-metadata": {
       // Response metadata arrives first, indicates a new response is starting
       return { ...state, isStreaming: true, messageIndexes };
@@ -108,7 +108,7 @@ export function iterateReducer(state: IterateState, event: IterateEvent): Iterat
 
     case "text-start": {
       // A new text message is starting
-      const messageId = payload.id;
+      const messageId = part.id;
       return {
         ...state,
         isStreaming: true,
@@ -121,12 +121,12 @@ export function iterateReducer(state: IterateState, event: IterateEvent): Iterat
 
     case "text-delta": {
       // Accumulate text chunks
-      const delta = payload.delta ?? "";
+      const delta = part.delta ?? "";
       const newText = state.streamingText + delta;
       const msgItem = msg("assistant", [{ type: "text", text: newText }], now);
 
       // Update or create streaming message in feed
-      const messageId = payload.id ?? state.streamingMessageId;
+      const messageId = part.id ?? state.streamingMessageId;
       if (messageId) {
         const existingIndex = messageIndexes.get(messageId);
         if (existingIndex !== undefined && state.feed[existingIndex]?.kind === "message") {
@@ -171,7 +171,7 @@ export function iterateReducer(state: IterateState, event: IterateEvent): Iterat
 
     case "text-end": {
       // Text message is complete
-      const messageId = payload.id ?? state.streamingMessageId;
+      const messageId = part.id ?? state.streamingMessageId;
       if (state.streamingText.trim()) {
         const msgItem = msg("assistant", [{ type: "text", text: state.streamingText }], now);
         if (messageId) {

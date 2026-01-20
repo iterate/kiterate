@@ -1,5 +1,5 @@
 /**
- * IterateStream - single stream with history and replay
+ * EventStream - single stream with history and replay
  */
 import { Effect, PubSub, Ref, Stream } from "effect";
 
@@ -7,10 +7,10 @@ import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage, StreamStorageError } from "../stream-storage/service.js";
 
 // -------------------------------------------------------------------------------------
-// IterateStream interface
+// EventStream interface
 // -------------------------------------------------------------------------------------
 
-export interface IterateStream {
+export interface EventStream {
   readonly append: (input: { event: EventInput }) => Effect.Effect<void, StreamStorageError>;
   /**
    * Subscribe to events on this stream.
@@ -24,13 +24,13 @@ export interface IterateStream {
 }
 
 // -------------------------------------------------------------------------------------
-// IterateStream implementation
+// EventStream implementation
 // -------------------------------------------------------------------------------------
 
 export const make = (input: {
   storage: StreamStorage;
   path: StreamPath;
-}): Effect.Effect<IterateStream> =>
+}): Effect.Effect<EventStream> =>
   Effect.gen(function* () {
     const { storage, path } = input;
     const pubsub = yield* PubSub.unbounded<Event>();

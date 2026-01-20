@@ -92,8 +92,8 @@ export function playAudio(audioChunks: string[]): void {
 export function grokReducer(state: GrokState, event: GrokEvent): GrokState {
   const now = Date.now();
 
-  // Only handle grok:event type
-  if (event.type !== "grok:event" || !event.payload) {
+  // Only handle iterate:grok:response:sse type
+  if (event.type !== "iterate:grok:response:sse" || !event.payload) {
     return state;
   }
 
@@ -163,6 +163,24 @@ export function grokReducer(state: GrokState, event: GrokEvent): GrokState {
         streamingMessage: undefined,
         // Note: audioChunks and streamingTranscript are NOT cleared - client reads them for playback
       };
+    }
+
+    // User audio transcription completed - add user message with recognized speech
+    case "conversation.item.input_audio_transcription.completed": {
+      const transcript = event.payload.transcript;
+      if (typeof transcript === "string" && transcript.trim()) {
+        const userMessage: MessageFeedItem = {
+          kind: "message",
+          role: "user",
+          content: [{ type: "text", text: transcript.trim() }],
+          timestamp: now,
+        };
+        return {
+          ...state,
+          feed: [...state.feed, userMessage],
+        };
+      }
+      return state;
     }
 
     default:

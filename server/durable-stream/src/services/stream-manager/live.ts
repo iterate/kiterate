@@ -5,7 +5,7 @@ import { Effect, Layer, Stream } from "effect";
 
 import { EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
-import * as IterateStream from "./iterateStream.js";
+import * as EventStream from "./eventStream.js";
 import { StreamManager } from "./service.js";
 
 // -------------------------------------------------------------------------------------
@@ -16,14 +16,14 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
   StreamManager,
   Effect.gen(function* () {
     const storage = yield* StreamStorage;
-    const streams = new Map<StreamPath, IterateStream.IterateStream>();
+    const streams = new Map<StreamPath, EventStream.EventStream>();
 
     const getOrCreateStream = Effect.fn(function* (path: StreamPath) {
       const existing = streams.get(path);
       if (existing) {
         return existing;
       }
-      const stream = yield* IterateStream.make({ storage, path });
+      const stream = yield* EventStream.make({ storage, path });
       streams.set(path, stream);
       return stream;
     });

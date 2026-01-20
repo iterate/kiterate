@@ -5,8 +5,8 @@
 // Re-export service definition
 export { StreamManager } from "./service.js";
 
-// Re-export IterateStream namespace
-export * as IterateStream from "./iterateStream.js";
+// Re-export EventStream namespace
+export * as EventStream from "./eventStream.js";
 
 // Re-export layers
 export { liveLayer } from "./live.js";

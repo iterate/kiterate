@@ -139,11 +139,18 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
                 Deferred.unsafeDone(readyDeferred, Effect.void);
               }
             } catch (e) {
-              // Ignore parse errors
+              console.warn(
+                "[grok-ws] Failed to parse message:",
+                e,
+                "raw:",
+                data.toString().slice(0, 200),
+              );
             }
           });
 
-          socket.on("error", (error) => resume(Effect.fail(error as Error)));
+          socket.on("error", (error) =>
+            resume(Effect.fail(error instanceof Error ? error : new Error(String(error)))),
+          );
 
           socket.on("close", () => {
             eventMailbox.unsafeDone(Exit.void);

@@ -70,6 +70,34 @@ export async function sendMessage(
   return sendRawJson(apiURL, agentPath, JSON.stringify(event, null, 2));
 }
 
+/** Audio input event for voice agents */
+export interface AudioInputEvent {
+  type: "iterate:agent:action:send-user-audio:called";
+  version: 1;
+  eventStreamId: string;
+  payload: { audio: string }; // base64 PCM s16le 48kHz
+}
+
+/** Create an audio input event envelope */
+export function createAudioEvent(agentPath: string, audioBase64: string): AudioInputEvent {
+  return {
+    type: "iterate:agent:action:send-user-audio:called",
+    version: 1,
+    eventStreamId: agentPath,
+    payload: { audio: audioBase64 },
+  };
+}
+
+/** Send audio to an agent (wrapped in event envelope) */
+export async function sendAudio(
+  apiURL: string,
+  agentPath: string,
+  audioBase64: string,
+): Promise<ApiResult> {
+  const event = createAudioEvent(agentPath, audioBase64);
+  return sendRawJson(apiURL, agentPath, JSON.stringify(event));
+}
+
 /**
  * Normalize an agent path input to just the session name.
  * Strips any prefixes like "#", "agents/", "/pi/", "pi/".
@@ -100,6 +128,41 @@ export function encodeAgentPath(sessionName: string, options?: { prefix?: string
     return `${normalizedPrefix}${encoded}`;
   }
   return `/${encoded}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Model Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Supported AI model types */
+export type AiModelType = "openai" | "grok";
+
+/** Config event for setting AI model */
+export interface ConfigSetEvent {
+  type: "iterate:agent:config:set";
+  version: 1;
+  eventStreamId: string;
+  payload: { model: AiModelType };
+}
+
+/** Create a config event for setting the AI model */
+export function createConfigEvent(agentPath: string, model: AiModelType): ConfigSetEvent {
+  return {
+    type: "iterate:agent:config:set",
+    version: 1,
+    eventStreamId: agentPath,
+    payload: { model },
+  };
+}
+
+/** Send a config event to set the AI model */
+export async function sendConfigEvent(
+  apiURL: string,
+  agentPath: string,
+  model: AiModelType,
+): Promise<ApiResult> {
+  const event = createConfigEvent(agentPath, model);
+  return sendRawJson(apiURL, agentPath, JSON.stringify(event));
 }
 
 /** Check if an agent path is a PI agent path */

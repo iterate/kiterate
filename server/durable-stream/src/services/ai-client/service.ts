@@ -70,7 +70,7 @@ const makeOpenAiClient = Effect.gen(function* () {
       return languageModel.streamText({ prompt: input.content }).pipe(
         Stream.map((part) =>
           EventInput.make({
-            type: EventType.make("iterate:llm:response:sse"),
+            type: EventType.make("iterate:openai:response:sse"),
             payload: { part },
           }),
         ),
@@ -86,6 +86,10 @@ const makeGrokClient = Effect.gen(function* () {
   const grokVoiceClient = yield* GrokVoiceClient;
 
   // Per-path connection cache
+  // TODO: Add connection lifecycle management:
+  //   - Evict stale/failed connections
+  //   - Health checks for long-lived connections
+  //   - Reconnect on WebSocket close/error
   const connectionsByPath = new Map<StreamPath, GrokVoiceConnection>();
 
   const getConnection = (path: StreamPath) =>
@@ -113,12 +117,17 @@ const makeGrokClient = Effect.gen(function* () {
           }
 
           return connection.events.pipe(
-            Stream.map((event) =>
-              EventInput.make({
+            Stream.map((event) => {
+              // Validate event is an object, wrap primitives
+              const payload: Record<string, unknown> =
+                typeof event === "object" && event !== null && !Array.isArray(event)
+                  ? (event as Record<string, unknown>)
+                  : { value: event };
+              return EventInput.make({
                 type: EventType.make("iterate:grok:response:sse"),
-                payload: event as Record<string, unknown>,
-              }),
-            ),
+                payload,
+              });
+            }),
           );
         }).pipe(
           Effect.catchAll((error) =>
