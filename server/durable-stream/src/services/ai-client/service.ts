@@ -41,18 +41,18 @@ export const PromptInput = Object.assign(Schema.Union(TextPrompt, AudioPrompt), 
 // AI Model Type
 // -------------------------------------------------------------------------------------
 
-export type AiModelType = "openai" | "grok";
 export const AiModelType = Object.assign(Schema.Literal("openai", "grok"), {
   fromEventInput: (event: EventInput): Option.Option<AiModelType> => {
     if (event.type === "iterate:agent:config:set") {
       const model = event.payload["model"];
-      if (model === "openai" || model === "grok") {
+      if (Schema.is(AiModelType)(model)) {
         return Option.some(model);
       }
     }
     return Option.none();
   },
 });
+export type AiModelType = typeof AiModelType.Type;
 
 // -------------------------------------------------------------------------------------
 // Client Constructors
