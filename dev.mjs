@@ -1,12 +1,14 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 
-const target = process.argv[2];
+// Usage: pnpm dev [backend] [frontend]
+// Defaults: backend=basic, frontend=basic
 
-const WEB_FILTER = "@iterate-com/daemon";
-const BACKENDS = new Map([
-  ["shiterate", "@kiterate/server-shiterate"],
-  ["reference-implementation", "@kiterate/reference-implementation"],
-]);
+const DEFAULT_BACKEND = "basic";
+const DEFAULT_FRONTEND = "basic";
+
+const backendArg = process.argv[2] ?? DEFAULT_BACKEND;
+const frontendArg = process.argv[3] ?? DEFAULT_FRONTEND;
 
 const children = [];
 
@@ -30,19 +32,36 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-if (target && !BACKENDS.has(target)) {
-  console.error(
-    `Unknown backend "${target}". Use "shiterate" or "reference-implementation", or omit the arg.`,
-  );
-  process.exit(1);
+function listDirs(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }
 
-if (target) {
-  const backendFilter = BACKENDS.get(target);
-  spawnPnpm(["--filter", backendFilter, "dev"], { PORT: "3001" });
+function ensureDirExists(kind, root, name) {
+  const available = listDirs(root);
+  if (!available.includes(name)) {
+    console.error(`Unknown ${kind} "${name}". Available: ${available.join(", ") || "none"}`);
+    process.exit(1);
+  }
 }
 
-spawnPnpm(["--filter", WEB_FILTER, "dev"]);
+ensureDirExists("backend", "server", backendArg);
+ensureDirExists("frontend", "web", frontendArg);
+
+const serverPkg = `./server/${backendArg}`;
+const webPkg = `./web/${frontendArg}`;
+
+console.log(`Starting: backend=${backendArg} (${serverPkg}), frontend=${frontendArg} (${webPkg})`);
+
+// Start server (port 3001)
+spawnPnpm(["--filter", serverPkg, "dev"], { PORT: "3001" });
+
+// Start web frontend (port 3000)
+spawnPnpm(["--filter", webPkg, "dev"]);
 
 for (const child of children) {
   child.on("exit", (code) => {

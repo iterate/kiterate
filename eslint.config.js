@@ -84,7 +84,8 @@ module.exports = defineConfig([
       "@typescript-eslint/ban-types": "off",
       "@typescript-eslint/no-confusing-void-expression": "off",
 
-      "import/extensions": ["error", "ignorePackages"],
+      // Disabled - bundlers handle resolution without extensions
+      "import/extensions": "off",
       "import/no-unresolved": "off",
       "import/order": "warn",
 

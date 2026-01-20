@@ -1,0 +1,28 @@
+{
+  "name": "@kiterate/server-harness-wrapper",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "doppler run -- tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "doppler run -- vitest run",
+    "test:watch": "doppler run -- vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "*",
+    "@hono/node-server": "^1.13.0",
+    "@kiterate/server-basic": "workspace:*",
+    "@mariozechner/pi-coding-agent": "^0.42.0",
+    "@opencode-ai/sdk": "*",
+    "hono": "^4.11.3",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
+  }
+}
