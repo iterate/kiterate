@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { MessageSquareIcon, CodeIcon, MessageCircleIcon, AlertCircleIcon } from "lucide-react";
+import { CodeIcon, MessageCircleIcon, AlertCircleIcon } from "lucide-react";
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
@@ -23,7 +23,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import {
@@ -163,6 +162,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   const isStreaming = stateIsStreaming || hookIsStreaming;
   const isDisabled = sending;
+  const resizeBehavior = useMemo(() => ({ mass: 1, damping: 45, stiffness: 320 }), []);
 
   // Notify parent of connection status changes
   useEffect(() => {
@@ -182,8 +182,6 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   // In raw mode, we render a single YAML dump instead of feed items
   const isRawMode = displayMode === "raw";
-  const isEmpty = !isRawMode && displayFeed?.length === 0 && !streamingMessage;
-
   // Sync raw events count to context
   useEffect(() => {
     setRawEventsCount(rawEvents.length);
@@ -250,16 +248,11 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Conversation className="flex-1 min-h-0" resize={isStreaming ? "instant" : "smooth"}>
+      <Conversation className="flex-1 min-h-0" resize={resizeBehavior}>
         <ConversationContent className={isRawMode ? "p-2" : "p-6"}>
           {isRawMode ? (
             // Raw Raw mode: render all events as a single YAML dump
-            rawEvents.length === 0 ? (
-              <ConversationEmptyState
-                icon={<MessageSquareIcon className="size-10" />}
-                title="No events yet"
-              />
-            ) : (
+            rawEvents.length === 0 ? null : (
               <SerializedObjectCodeBlock
                 data={rawEvents}
                 className="h-full"
@@ -268,11 +261,6 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
                 showCopyButton
               />
             )
-          ) : isEmpty ? (
-            <ConversationEmptyState
-              icon={<MessageSquareIcon className="size-10" />}
-              title="No events yet"
-            />
           ) : (
             <>
               {displayFeed?.map((item) => (

@@ -9,20 +9,30 @@ import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 
 export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
-export const Conversation = ({ className, resize = "smooth", ...props }: ConversationProps) => (
+export const Conversation = ({
+  className,
+  resize = "smooth",
+  style,
+  ...props
+}: ConversationProps) => (
   <StickToBottom
     className={cn("relative flex-1 overflow-y-hidden", className)}
     initial="instant"
     resize={resize}
     role="log"
+    style={{ overflowAnchor: "none", ...style }}
     {...props}
   />
 );
 
 export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 
-export const ConversationContent = ({ className, ...props }: ConversationContentProps) => (
-  <StickToBottom.Content className={cn("flex flex-col gap-8 p-4", className)} {...props} />
+export const ConversationContent = ({ className, style, ...props }: ConversationContentProps) => (
+  <StickToBottom.Content
+    className={cn("flex flex-col gap-8 p-4", className)}
+    style={{ overflowAnchor: "none", ...style }}
+    {...props}
+  />
 );
 
 export type ConversationEmptyStateProps = ComponentProps<"div"> & {

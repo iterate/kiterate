@@ -1,5 +1,5 @@
 {
-  "name": "@kiterate/server-basic-with-pi",
+  "name": "@kiterate/server-harness-wrapper",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,9 +11,11 @@
     "test:watch": "doppler run -- vitest"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "*",
     "@hono/node-server": "^1.13.0",
     "@kiterate/server-basic": "workspace:*",
     "@mariozechner/pi-coding-agent": "^0.42.0",
+    "@opencode-ai/sdk": "*",
     "hono": "^4.11.3",
     "yaml": "^2.7.0"
   },

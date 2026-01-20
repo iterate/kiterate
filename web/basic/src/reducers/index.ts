@@ -3,7 +3,9 @@
  *
  * Exports:
  * - PI reducer for typed AgentSessionEvent (inner events)
- * - Wrapper reducer for envelope extraction and non-PI events
+ * - Claude reducer for Claude SDK V2 SDKMessage events
+ * - OpenCode reducer for OpenCode SDK events
+ * - Wrapper reducer for envelope extraction and harness-specific events
  * - Identity reducer for raw event accumulation
  */
 
@@ -25,6 +27,11 @@ import {
   getMessages,
   getTools,
 } from "./pi";
+import { claudeReducer as innerClaudeReducer, type FeedItem as ClaudeFeedItem } from "./claude";
+import {
+  openCodeReducer as innerOpenCodeReducer,
+  type FeedItem as OpenCodeFeedItem,
+} from "./opencode";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-export shared types from backend
@@ -68,10 +75,19 @@ export interface WrapperState {
   streamingMessage?: MessageFeedItem | undefined;
   activeTools: Map<string, { feedIndex: number }>;
   rawEvents: unknown[];
+  openCodeMessageRoles: Map<string, "user" | "assistant">;
+  openCodeMessageIndexes: Map<string, number>;
 }
 
 export function createInitialWrapperState(): WrapperState {
-  return { feed: [], isStreaming: false, activeTools: new Map(), rawEvents: [] };
+  return {
+    feed: [],
+    isStreaming: false,
+    activeTools: new Map(),
+    rawEvents: [],
+    openCodeMessageRoles: new Map(),
+    openCodeMessageIndexes: new Map(),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,6 +95,8 @@ export function createInitialWrapperState(): WrapperState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PI_EVENT = "iterate:agent:harness:pi:event-received";
+const CLAUDE_EVENT = "iterate:agent:harness:claude:event-received";
+const OPENCODE_EVENT = "iterate:agent:harness:opencode:event-received";
 const USER_MSG = "iterate:agent:action:send-user-message:called";
 const AGENT_ERROR = "iterate:agent:error";
 
@@ -103,6 +121,43 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
   // Always create an EventFeedItem for raw event display
   const evtItem: EventFeedItem = { kind: "event", eventType: type, timestamp: t, raw: event };
 
+  function insertEventItem(
+    innerState: Omit<
+      WrapperState,
+      "rawEvents" | "feed" | "openCodeMessageRoles" | "openCodeMessageIndexes"
+    > & {
+      feed: InnerFeedItem[];
+      openCodeMessageRoles?: Map<string, "user" | "assistant">;
+      openCodeMessageIndexes?: Map<string, number>;
+    },
+  ): WrapperState {
+    const insertAt = state.feed.length;
+    const feed = [...(innerState.feed as FeedItem[])];
+    feed.splice(insertAt, 0, evtItem);
+    const activeTools = new Map(innerState.activeTools);
+    for (const [toolCallId, info] of activeTools) {
+      if (info.feedIndex >= insertAt) {
+        activeTools.set(toolCallId, { feedIndex: info.feedIndex + 1 });
+      }
+    }
+    const openCodeMessageIndexes = new Map(
+      innerState.openCodeMessageIndexes ?? state.openCodeMessageIndexes,
+    );
+    for (const [messageId, index] of openCodeMessageIndexes) {
+      if (index >= insertAt) {
+        openCodeMessageIndexes.set(messageId, index + 1);
+      }
+    }
+    return {
+      ...innerState,
+      feed,
+      activeTools,
+      rawEvents,
+      openCodeMessageRoles: innerState.openCodeMessageRoles ?? state.openCodeMessageRoles,
+      openCodeMessageIndexes,
+    };
+  }
+
   // Extract and delegate PI events to inner reducer
   if (type === PI_EVENT) {
     const piEvent = (e.payload as { piEvent?: AgentSessionEvent })?.piEvent;
@@ -116,12 +171,48 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
         },
         piEvent,
       );
-      // Add EventFeedItem for raw display, plus any pretty items from inner reducer
-      return {
-        ...innerState,
-        feed: [...state.feed, evtItem, ...innerState.feed.slice(state.feed.length)] as FeedItem[],
-        rawEvents,
-      };
+      // Insert EventFeedItem for raw display while keeping inner updates intact
+      return insertEventItem(innerState);
+    }
+  }
+
+  // Extract and delegate Claude events to inner reducer
+  if (type === CLAUDE_EVENT) {
+    const claudeEvent = (e.payload as { claudeEvent?: unknown })?.claudeEvent;
+    if (claudeEvent) {
+      const innerState = innerClaudeReducer(
+        {
+          feed: state.feed as ClaudeFeedItem[],
+          isStreaming: state.isStreaming,
+          streamingMessage: state.streamingMessage,
+          activeTools: state.activeTools,
+        },
+        claudeEvent as Parameters<typeof innerClaudeReducer>[1],
+      );
+      return insertEventItem(innerState as typeof innerState & { feed: InnerFeedItem[] });
+    }
+  }
+
+  // Extract and delegate OpenCode events to inner reducer
+  if (type === OPENCODE_EVENT) {
+    const openCodeEvent = (e.payload as { openCodeEvent?: unknown })?.openCodeEvent;
+    if (openCodeEvent) {
+      const innerState = innerOpenCodeReducer(
+        {
+          feed: state.feed as OpenCodeFeedItem[],
+          isStreaming: state.isStreaming,
+          streamingMessage: state.streamingMessage,
+          activeTools: state.activeTools,
+          messageRoles: state.openCodeMessageRoles,
+          messageIndexes: state.openCodeMessageIndexes,
+        },
+        openCodeEvent as Parameters<typeof innerOpenCodeReducer>[1],
+      );
+      return insertEventItem({
+        ...(innerState as typeof innerState & { feed: InnerFeedItem[] }),
+        openCodeMessageRoles: innerState.messageRoles ?? state.openCodeMessageRoles,
+        openCodeMessageIndexes: innerState.messageIndexes ?? state.openCodeMessageIndexes,
+      });
     }
   }
 

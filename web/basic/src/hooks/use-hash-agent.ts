@@ -1,42 +1,49 @@
 import { useState, useEffect, useCallback } from "react";
-import { getSessionName, isPiAgentPath } from "@/lib/agent-api";
+import {
+  getSessionName,
+  detectHarnessType,
+  getHarnessPrefix,
+  stripHarnessPrefix,
+  type HarnessType,
+} from "@/lib/agent-api";
 
 export interface UseHashAgentReturn {
   /** The current agent path from the URL hash (e.g., "/pi/my-session") */
   selectedStream: string;
-  /** The current input value (includes /pi/ prefix when in pi mode) */
+  /** The current input value (includes harness prefix when selected) */
   agentPathInput: string;
-  /** Whether PI mode is enabled */
-  piMode: boolean;
+  /** The current harness type (pi, claude, opencode, or null for raw) */
+  harnessType: HarnessType;
   /** Update the session name input */
   setAgentPathInput: (path: string) => void;
-  /** Toggle PI mode - updates input prefix accordingly */
-  setPiMode: (enabled: boolean) => void;
+  /** Set harness type - updates input prefix accordingly */
+  setHarnessType: (type: HarnessType) => void;
   /** Navigate to the agent (updates URL hash) */
   selectAgent: () => void;
 }
 
 /**
  * Hook for managing agent selection via URL hash.
- * Handles hash reading, PI mode detection, and navigation.
+ * Handles hash reading, harness type detection, and navigation.
  * Agent paths always start with "/" (e.g., "/pi/my-session" or "/my-session").
  */
 export function useHashAgent(): UseHashAgentReturn {
   const [selectedStream, setSelectedStream] = useState("");
   const [agentPathInput, setAgentPathInput] = useState("");
-  const [piMode, setPiModeInternal] = useState(false);
+  const [harnessType, setHarnessTypeInternal] = useState<HarnessType>(null);
 
-  // Handler that updates piMode and adjusts input prefix accordingly
-  const setPiMode = useCallback((enabled: boolean) => {
-    setPiModeInternal(enabled);
+  // Handler that updates harnessType and adjusts input prefix accordingly
+  const setHarnessType = useCallback((type: HarnessType) => {
+    setHarnessTypeInternal(type);
     setAgentPathInput((current) => {
-      const hasPrefix = current.startsWith("/pi/");
-      if (enabled && !hasPrefix) {
-        return "/pi/" + current;
-      } else if (!enabled && hasPrefix) {
-        return current.slice(4); // Remove "/pi/" prefix
+      // Strip any existing harness prefix
+      const sessionName = stripHarnessPrefix(current);
+
+      // Add new prefix if type is set
+      if (type) {
+        return getHarnessPrefix(type) + sessionName;
       }
-      return current;
+      return sessionName;
     });
   }, []);
 
@@ -56,11 +63,11 @@ export function useHashAgent(): UseHashAgentReturn {
       const normalizedPath = decoded && !decoded.startsWith("/") ? `/${decoded}` : decoded;
       setSelectedStream(normalizedPath);
 
-      // Auto-detect PI mode and set input (with prefix if pi mode)
-      const isPi = isPiAgentPath(normalizedPath);
-      setPiModeInternal(isPi);
-      if (isPi) {
-        // Keep the full path including /pi/ prefix in the input
+      // Auto-detect harness type and set input
+      const detectedType = detectHarnessType(normalizedPath);
+      setHarnessTypeInternal(detectedType);
+      if (detectedType) {
+        // Keep the full path including harness prefix in the input
         setAgentPathInput(normalizedPath);
       } else {
         setAgentPathInput(getSessionName(normalizedPath));
@@ -76,7 +83,7 @@ export function useHashAgent(): UseHashAgentReturn {
     const trimmed = agentPathInput.trim();
     if (!trimmed) return;
 
-    // The input now contains the full path including /pi/ prefix when in pi mode
+    // The input now contains the full path including harness prefix when selected
     // Just ensure it starts with /
     const finalPath = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
     window.location.hash = finalPath;
@@ -85,9 +92,9 @@ export function useHashAgent(): UseHashAgentReturn {
   return {
     selectedStream,
     agentPathInput,
-    piMode,
+    harnessType,
     setAgentPathInput,
-    setPiMode,
+    setHarnessType,
     selectAgent,
   };
 }

@@ -12,12 +12,12 @@
 #
 # Arguments:
 #   server-name   Name of server in server/ directory (default: basic)
-#                 Available: basic, basic-with-pi
+#                 Available: basic, harness-wrapper
 #
 # Examples:
 #   ./smoke-test.sh              # Test basic
 #   ./smoke-test.sh basic
-#   ./smoke-test.sh basic-with-pi
+#   ./smoke-test.sh harness-wrapper
 #
 
 set -euo pipefail
@@ -60,7 +60,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     echo "Examples:"
     echo "  $0                    # Test basic"
     echo "  $0 basic              # Test basic"
-    echo "  $0 basic-with-pi      # Test basic-with-pi"
+    echo "  $0 harness-wrapper    # Test harness-wrapper"
     exit 0
 fi
 
@@ -70,7 +70,7 @@ SERVER_NAME="${1:-basic}"
 get_pnpm_filter() {
     case "$1" in
         basic) echo "@kiterate/server-basic" ;;
-        basic-with-pi) echo "@kiterate/server-basic-with-pi" ;;
+        harness-wrapper) echo "@kiterate/server-harness-wrapper" ;;
         *) echo "" ;;
     esac
 }

@@ -40,8 +40,16 @@ Examples:
 `);
 }
 
+function encodeAgentPath(agentPath: string): string {
+  const normalized = agentPath.startsWith("/") ? agentPath.slice(1) : agentPath;
+  return normalized
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
 function buildStreamUrl(baseUrl: string, agentPath: string): string {
-  return `${baseUrl}/agents/${encodeURIComponent(agentPath)}`;
+  return `${baseUrl}/agents/${encodeAgentPath(agentPath)}`;
 }
 
 async function appendEvent(baseUrl: string, agentPath: string, jsonData: string) {

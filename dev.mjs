@@ -1,17 +1,11 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 
 // Usage: pnpm dev [backend] [frontend]
-// Defaults: backend=basic, frontend=shiterate
-
-const BACKENDS = new Map([
-  ["basic", "@kiterate/server-basic"],
-  ["basic-with-pi", "@kiterate/server-basic-with-pi"],
-]);
-
-const FRONTENDS = new Map([["shiterate", "@iterate-com/daemon"]]);
+// Defaults: backend=basic, frontend=basic
 
 const DEFAULT_BACKEND = "basic";
-const DEFAULT_FRONTEND = "shiterate";
+const DEFAULT_FRONTEND = "basic";
 
 const backendArg = process.argv[2] ?? DEFAULT_BACKEND;
 const frontendArg = process.argv[3] ?? DEFAULT_FRONTEND;
@@ -38,20 +32,28 @@ function shutdown(code = 0) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-if (!BACKENDS.has(backendArg)) {
-  console.error(`Unknown backend "${backendArg}". Available: ${[...BACKENDS.keys()].join(", ")}`);
-  process.exit(1);
+function listDirs(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
 }
 
-if (!FRONTENDS.has(frontendArg)) {
-  console.error(
-    `Unknown frontend "${frontendArg}". Available: ${[...FRONTENDS.keys()].join(", ")}`,
-  );
-  process.exit(1);
+function ensureDirExists(kind, root, name) {
+  const available = listDirs(root);
+  if (!available.includes(name)) {
+    console.error(`Unknown ${kind} "${name}". Available: ${available.join(", ") || "none"}`);
+    process.exit(1);
+  }
 }
 
-const serverPkg = BACKENDS.get(backendArg);
-const webPkg = FRONTENDS.get(frontendArg);
+ensureDirExists("backend", "server", backendArg);
+ensureDirExists("frontend", "web", frontendArg);
+
+const serverPkg = `./server/${backendArg}`;
+const webPkg = `./web/${frontendArg}`;
 
 console.log(`Starting: backend=${backendArg} (${serverPkg}), frontend=${frontendArg} (${webPkg})`);
 

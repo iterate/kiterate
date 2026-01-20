@@ -30,7 +30,7 @@ export interface CachedStream {
 // Store
 // ─────────────────────────────────────────────────────────────────────────────
 
-const store = createStore("shiterate-events", "streams");
+const store = createStore("basic-events", "streams");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Write Queue (prevents race conditions when multiple appends happen in quick succession)
@@ -62,8 +62,11 @@ function enqueueWrite(storageKey: string, operation: () => Promise<void>): Promi
  */
 function shouldPersist(event: StoredEvent): boolean {
   // Check for PI SDK events wrapped in event-received envelope
-  const payload = event.payload as { piEventType?: string } | undefined;
+  const payload = event.payload as { piEventType?: string; openCodeEventType?: string } | undefined;
   if (payload?.piEventType === "message_update") {
+    return false;
+  }
+  if (payload?.openCodeEventType === "message.part.updated") {
     return false;
   }
 

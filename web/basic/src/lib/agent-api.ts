@@ -109,5 +109,44 @@ export function isPiAgentPath(agentPath: string): boolean {
 
 /** Extract the session name from an agent path */
 export function getSessionName(agentPath: string): string {
-  return agentPath.replace(/^\/?pi\//, "").replace(/^\//, "");
+  return agentPath
+    .replace(/^\/?pi\//, "")
+    .replace(/^\/?claude\//, "")
+    .replace(/^\/?opencode\//, "")
+    .replace(/^\//, "");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Harness Type Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Available harness types */
+export type HarnessType = "pi" | "claude" | "opencode" | null;
+
+/** All harness prefixes */
+const HARNESS_PREFIXES: Record<Exclude<HarnessType, null>, string> = {
+  pi: "/pi/",
+  claude: "/claude/",
+  opencode: "/opencode/",
+};
+
+/** Detect harness type from an agent path */
+export function detectHarnessType(agentPath: string): HarnessType {
+  if (agentPath.startsWith("/pi/")) return "pi";
+  if (agentPath.startsWith("/claude/")) return "claude";
+  if (agentPath.startsWith("/opencode/")) return "opencode";
+  return null;
+}
+
+/** Get the URL prefix for a harness type */
+export function getHarnessPrefix(type: HarnessType): string {
+  if (!type) return "/";
+  return HARNESS_PREFIXES[type];
+}
+
+/** Strip any harness prefix from an agent path */
+export function stripHarnessPrefix(agentPath: string): string {
+  const harnessType = detectHarnessType(agentPath);
+  if (!harnessType) return agentPath.replace(/^\//, "");
+  return agentPath.slice(HARNESS_PREFIXES[harnessType].length);
 }

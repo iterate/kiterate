@@ -51,6 +51,16 @@ function clearStreaming(state: PiState): PiState {
 export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
   const now = Date.now();
 
+  const findToolIndex = (toolCallId: string): number | undefined => {
+    for (let i = state.feed.length - 1; i >= 0; i -= 1) {
+      const item = state.feed[i];
+      if (item.kind === "tool" && item.toolCallId === toolCallId) {
+        return i;
+      }
+    }
+    return undefined;
+  };
+
   switch (event.type) {
     case "tool_execution_start": {
       const item: ToolFeedItem = {
@@ -69,22 +79,28 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
 
     case "tool_execution_update": {
       const active = state.activeTools.get(event.toolCallId);
-      if (!active) return state;
+      const toolIndex = active?.feedIndex ?? findToolIndex(event.toolCallId);
+      if (toolIndex === undefined) return state;
       const feed = [...state.feed];
-      feed[active.feedIndex] = {
-        ...(feed[active.feedIndex] as ToolFeedItem),
+      feed[toolIndex] = {
+        ...(feed[toolIndex] as ToolFeedItem),
         state: "running",
         output: event.partialResult,
       };
-      return { ...state, feed };
+      const activeTools = new Map(state.activeTools);
+      if (!active || active.feedIndex !== toolIndex) {
+        activeTools.set(event.toolCallId, { feedIndex: toolIndex });
+      }
+      return { ...state, feed, activeTools };
     }
 
     case "tool_execution_end": {
       const active = state.activeTools.get(event.toolCallId);
-      if (!active) return state;
+      const toolIndex = active?.feedIndex ?? findToolIndex(event.toolCallId);
+      if (toolIndex === undefined) return state;
       const feed = [...state.feed];
       const updated: ToolFeedItem = {
-        ...(feed[active.feedIndex] as ToolFeedItem),
+        ...(feed[toolIndex] as ToolFeedItem),
         state: event.isError ? "error" : "completed",
         output: event.result,
         endTimestamp: now,
@@ -95,7 +111,7 @@ export function piReducer(state: PiState, event: AgentSessionEvent): PiState {
             ? event.result
             : ((event.result as { message?: string })?.message ?? "Failed");
       }
-      feed[active.feedIndex] = updated;
+      feed[toolIndex] = updated;
       const activeTools = new Map(state.activeTools);
       activeTools.delete(event.toolCallId);
       return { ...state, feed, activeTools };

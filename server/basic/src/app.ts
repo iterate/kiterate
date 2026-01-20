@@ -103,6 +103,12 @@ export function createApp(config: AppConfig): Hono {
         return;
       }
 
+      // Flush a lightweight ping to ensure SSE connects immediately
+      await stream.writeSSE({
+        event: "ping",
+        data: JSON.stringify({ ok: true, ts: Date.now() }),
+      });
+
       // Keep connection open for live updates
       const TIMEOUT_MS = 30_000;
       while (true) {

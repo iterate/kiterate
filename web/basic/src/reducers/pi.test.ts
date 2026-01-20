@@ -8,6 +8,7 @@ import {
   wrapperReducer,
   createInitialWrapperState,
   getWrapperMessages,
+  getWrapperTools,
   type WrapperState,
 } from "./index";
 
@@ -125,6 +126,39 @@ messages:
     timestamp: 2026-01-05T20:00:01.005Z
 `;
 
+const TOOL_CALL_YAML = `
+id: test-tools
+contentType: application/json
+createdAt: 2026-01-05T20:00:00.000Z
+messages:
+  - offset: "1"
+    content:
+      type: iterate:agent:harness:pi:event-received
+      createdAt: 2026-01-05T20:00:01.001Z
+      payload:
+        piEventType: tool_execution_start
+        piEvent:
+          type: tool_execution_start
+          toolCallId: call_123
+          toolName: read
+          args:
+            path: /tmp/demo.txt
+    timestamp: 2026-01-05T20:00:01.001Z
+  - offset: "2"
+    content:
+      type: iterate:agent:harness:pi:event-received
+      createdAt: 2026-01-05T20:00:01.002Z
+      payload:
+        piEventType: tool_execution_end
+        piEvent:
+          type: tool_execution_end
+          toolCallId: call_123
+          toolName: read
+          result: ""
+          isError: false
+    timestamp: 2026-01-05T20:00:01.002Z
+`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests: Inner PI Reducer (typed AgentSessionEvent)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +245,32 @@ describe("piReducer (inner, typed)", () => {
     expect((state.feed[0] as any).state).toBe("completed");
   });
 
+  it("should complete tool even if activeTools is out of sync", () => {
+    const state = {
+      ...createInitialPiState(),
+      feed: [
+        {
+          kind: "tool",
+          toolCallId: "tc2",
+          toolName: "read",
+          state: "pending",
+          input: { path: "/tmp/demo.txt" },
+          startTimestamp: Date.now(),
+        },
+      ],
+    };
+
+    const next = piReducer(state, {
+      type: "tool_execution_end",
+      toolCallId: "tc2",
+      toolName: "read",
+      result: "done",
+      isError: false,
+    });
+
+    expect((next.feed[0] as any).state).toBe("completed");
+  });
+
   it("should clear streaming on agent_end", () => {
     let state = createInitialPiState();
     state = piReducer(state, {
@@ -292,6 +352,15 @@ describe("wrapperReducer (envelope extraction)", () => {
     const state = reduceWrapperEvents(events);
 
     expect(state.rawEvents).toHaveLength(events.length);
+  });
+
+  it("should mark tool calls completed from PI envelope events", () => {
+    const events = parseYamlStreamEnvelopes(TOOL_CALL_YAML);
+    const state = reduceWrapperEvents(events);
+
+    const tools = getWrapperTools(state);
+    expect(tools).toHaveLength(1);
+    expect(tools[0].state).toBe("completed");
   });
 });
 

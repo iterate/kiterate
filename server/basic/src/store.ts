@@ -129,12 +129,14 @@ export class EventStore {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    // Filter out transient events (message_update) before persisting
+    // Filter out transient events (message_update / message.part.updated) before persisting
     const persistedEvents = data.events.filter((e) => {
       const payload = (e.data as Record<string, unknown>)?.payload as
         | Record<string, unknown>
         | undefined;
-      return payload?.piEventType !== "message_update";
+      if (payload?.piEventType === "message_update") return false;
+      if (payload?.openCodeEventType === "message.part.updated") return false;
+      return true;
     });
 
     const content = YAML.stringify({ ...data, events: persistedEvents });
