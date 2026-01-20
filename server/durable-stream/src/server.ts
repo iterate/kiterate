@@ -8,7 +8,7 @@ import {
   HttpMiddleware,
 } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 
 import * as Sse from "./Sse.js";
 import { StreamManager, StreamPath, Event } from "./StreamManager.js";
@@ -31,13 +31,17 @@ const appendHandler = Effect.gen(function* () {
   const path = req.url.replace(/^\/agents\//, "");
   const streamPath = StreamPath.make(path);
   const body = yield* req.json;
-  const event = Event.make(body as Record<string, unknown>);
+  const event = yield* Schema.decodeUnknown(Event)(body);
 
   const manager = yield* StreamManager;
   yield* manager.append({ streamPath, event });
 
   return HttpServerResponse.empty({ status: 204 });
-});
+}).pipe(
+  Effect.catchTag("ParseError", (error) =>
+    HttpServerResponse.json({ error: error.message }, { status: 400 }),
+  ),
+);
 
 // Router + serve layer (without Node HTTP - for testing)
 export const AppLive = HttpRouter.empty.pipe(

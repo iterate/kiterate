@@ -6,16 +6,22 @@ import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
 import { AppLive } from "./server.js";
 import { InMemoryStreamManager } from "./StreamManager.js";
 
+// In => Out
+
 const TestLayer = Layer.merge(
-  AppLive.pipe(Layer.provide(InMemoryStreamManager), Layer.provide(NodeHttpServer.layerTest)),
+  AppLive.pipe(
+    Layer.provide(InMemoryStreamManager), //
+    Layer.provide(NodeHttpServer.layerTest),
+  ),
   NodeHttpServer.layerTest,
 );
 
-// Test helper: wraps it.live with timeout, layer, and scope
 const test = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
-  it.live(name, () => effect.pipe(Effect.timeout("500 millis"), Effect.provide(TestLayer), Effect.scoped));
+  it.live(name, () =>
+    effect.pipe(Effect.timeout("500 millis"), Effect.provide(TestLayer), Effect.scoped),
+  );
 
-// Helper: subscribe to SSE stream, returns fiber
+// Raw HTTP SSE requires fork pattern - Stream.toQueue doesn't work with raw HTTP streams
 const subscribe = (path: string) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
@@ -23,7 +29,6 @@ const subscribe = (path: string) =>
     return yield* response.stream.pipe(Stream.decodeText(), Stream.take(1), Stream.runCollect);
   }).pipe(Effect.fork);
 
-// Helper: post JSON to path
 const post = (path: string, body: unknown) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
@@ -94,6 +99,19 @@ describe("Durable Stream Server", () => {
         }),
       );
       expect(resultB).toBe("timeout");
+    }),
+  );
+
+  test(
+    "POST with invalid body returns 400",
+    Effect.gen(function* () {
+      const client = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
+      const request = HttpClientRequest.post("/agents/test/invalid").pipe(
+        HttpClientRequest.bodyUnsafeJson("not an object"),
+      );
+      const error = yield* client.execute(request).pipe(Effect.flip);
+      expect(error._tag).toBe("ResponseError");
+      expect((error as { response: { status: number } }).response.status).toBe(400);
     }),
   );
 });
