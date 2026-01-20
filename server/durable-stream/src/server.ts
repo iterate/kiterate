@@ -10,6 +10,7 @@ import {
 import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer, Stream } from "effect";
 
+import * as Sse from "./Sse.js";
 import { StreamManager, StreamPath, Event } from "./StreamManager.js";
 
 // GET /agents/* -> SSE stream
@@ -19,29 +20,9 @@ const subscribeHandler = Effect.gen(function* () {
   const streamPath = StreamPath.make(path);
   const manager = yield* StreamManager;
 
-  // Send initial control event (upToDate since we have no history)
-  const controlEvent = `event: control\ndata: ${JSON.stringify({ upToDate: true })}\n\n`;
+  const stream = manager.subscribe({ streamPath }).pipe(Stream.map(Sse.data));
 
-  const sseStream = Stream.make(controlEvent).pipe(
-    Stream.concat(
-      manager
-        .subscribe({ streamPath })
-        .pipe(
-          Stream.map(
-            (event) => `event: data\ndata: ${JSON.stringify(event)}\n\n`,
-          ),
-        ),
-    ),
-    Stream.encodeText,
-  );
-
-  return HttpServerResponse.stream(sseStream, {
-    contentType: "text/event-stream",
-    headers: {
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-    },
-  });
+  return Sse.response(stream);
 });
 
 // POST /agents/* -> append event

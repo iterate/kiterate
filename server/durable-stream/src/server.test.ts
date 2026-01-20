@@ -1,136 +1,88 @@
 import { HttpClient, HttpClientRequest } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
-import { Effect, Stream, Chunk, Fiber, Layer } from "effect";
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "@effect/vitest";
+import { Chunk, Effect, Fiber, Layer, Stream } from "effect";
 
 import { AppLive } from "./server.js";
 import { InMemoryStreamManager } from "./StreamManager.js";
 
-// Compose test layer: app server + in-memory streams + test HTTP
-// Layer.merge ensures HttpClient from layerTest is available to tests
 const TestLayer = Layer.merge(
-  AppLive.pipe(
-    Layer.provide(InMemoryStreamManager),
-    Layer.provide(NodeHttpServer.layerTest),
-  ),
+  AppLive.pipe(Layer.provide(InMemoryStreamManager), Layer.provide(NodeHttpServer.layerTest)),
   NodeHttpServer.layerTest,
 );
 
-describe("Durable Stream Server", () => {
-  it("POST returns 204", async () => {
-    const program = Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
+// Test helper: wraps it.live with timeout, layer, and scope
+const test = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
+  it.live(name, () => effect.pipe(Effect.timeout("500 millis"), Effect.provide(TestLayer), Effect.scoped));
 
+// Helper: subscribe to SSE stream, returns fiber
+const subscribe = (path: string) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient;
+    const response = yield* client.execute(HttpClientRequest.get(path));
+    return yield* response.stream.pipe(Stream.decodeText(), Stream.take(1), Stream.runCollect);
+  }).pipe(Effect.fork);
+
+// Helper: post JSON to path
+const post = (path: string, body: unknown) =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient.HttpClient;
+    yield* client.execute(
+      HttpClientRequest.post(path).pipe(HttpClientRequest.bodyUnsafeJson(body)),
+    );
+  });
+
+describe("Durable Stream Server", () => {
+  test(
+    "POST returns 204",
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient;
       const response = yield* client.execute(
         HttpClientRequest.post("/agents/test/stream").pipe(
           HttpClientRequest.bodyUnsafeJson({ type: "test", msg: "hello" }),
         ),
       );
-
       expect(response.status).toBe(204);
-    });
+    }),
+  );
 
-    await Effect.runPromise(program.pipe(Effect.provide(TestLayer), Effect.scoped));
-  });
-
-  it("SSE subscriber receives posted event", async () => {
-    const program = Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
-
-      const subscriberFiber = yield* Effect.gen(function* () {
-        const response = yield* client.execute(HttpClientRequest.get("/agents/chat/room1"));
-        return yield* response.stream.pipe(
-          Stream.decodeText(),
-          Stream.take(2), // control event + data event
-          Stream.runCollect,
-        );
-      }).pipe(Effect.fork);
-
+  test(
+    "SSE subscriber receives posted event",
+    Effect.gen(function* () {
+      const fiber = yield* subscribe("/agents/chat/room1");
       yield* Effect.sleep("50 millis");
+      yield* post("/agents/chat/room1", { type: "message", text: "Hello SSE!" });
 
-      yield* client.execute(
-        HttpClientRequest.post("/agents/chat/room1").pipe(
-          HttpClientRequest.bodyUnsafeJson({
-            type: "message",
-            text: "Hello SSE!",
-          }),
-        ),
-      );
-
-      const chunks = yield* Fiber.join(subscriberFiber);
+      const chunks = yield* Fiber.join(fiber);
       const data = Chunk.toReadonlyArray(chunks).join("");
-
       expect(data).toContain("data:");
       expect(data).toContain("Hello SSE!");
-    });
+    }),
+  );
 
-    await Effect.runPromise(program.pipe(Effect.provide(TestLayer), Effect.scoped));
-  });
-
-  it("multiple subscribers on same path receive same event", async () => {
-    const program = Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
-
-      const makeSubscriber = (path: string) =>
-        Effect.gen(function* () {
-          const response = yield* client.execute(HttpClientRequest.get(path));
-          return yield* response.stream.pipe(
-            Stream.decodeText(),
-            Stream.take(2), // control event + data event
-            Stream.runCollect,
-          );
-        }).pipe(Effect.fork);
-
-      const sub1 = yield* makeSubscriber("/agents/broadcast/chan");
-      const sub2 = yield* makeSubscriber("/agents/broadcast/chan");
-
+  test(
+    "multiple subscribers on same path receive same event",
+    Effect.gen(function* () {
+      const sub1 = yield* subscribe("/agents/broadcast/chan");
+      const sub2 = yield* subscribe("/agents/broadcast/chan");
       yield* Effect.sleep("50 millis");
-
-      yield* client.execute(
-        HttpClientRequest.post("/agents/broadcast/chan").pipe(
-          HttpClientRequest.bodyUnsafeJson({ msg: "broadcast" }),
-        ),
-      );
+      yield* post("/agents/broadcast/chan", { msg: "broadcast" });
 
       const [chunks1, chunks2] = yield* Effect.all([Fiber.join(sub1), Fiber.join(sub2)]);
+      expect(Chunk.toReadonlyArray(chunks1).join("")).toContain("broadcast");
+      expect(Chunk.toReadonlyArray(chunks2).join("")).toContain("broadcast");
+    }),
+  );
 
-      const data1 = Chunk.toReadonlyArray(chunks1).join("");
-      const data2 = Chunk.toReadonlyArray(chunks2).join("");
-
-      expect(data1).toContain("broadcast");
-      expect(data2).toContain("broadcast");
-    });
-
-    await Effect.runPromise(program.pipe(Effect.provide(TestLayer), Effect.scoped));
-  });
-
-  it("different paths are independent", async () => {
-    const program = Effect.gen(function* () {
-      const client = yield* HttpClient.HttpClient;
-
-      const subscribe = (path: string) =>
-        Effect.gen(function* () {
-          const response = yield* client.execute(HttpClientRequest.get(path));
-          return yield* response.stream.pipe(
-            Stream.decodeText(),
-            Stream.take(2), // control event + data event
-            Stream.runCollect,
-          );
-        }).pipe(Effect.fork);
-
+  test(
+    "different paths are independent",
+    Effect.gen(function* () {
       const subA = yield* subscribe("/agents/path/a");
       const subB = yield* subscribe("/agents/path/b");
-
       yield* Effect.sleep("50 millis");
+      yield* post("/agents/path/a", { source: "A" });
 
-      yield* client.execute(
-        HttpClientRequest.post("/agents/path/a").pipe(
-          HttpClientRequest.bodyUnsafeJson({ source: "A" }),
-        ),
-      );
-
-      const chunksA = yield* Fiber.join(subA);
-      const dataA = Chunk.toReadonlyArray(chunksA).join("");
+      const dataA = Chunk.toReadonlyArray(yield* Fiber.join(subA)).join("");
       expect(dataA).toContain("source");
       expect(dataA).toContain("A");
 
@@ -142,8 +94,6 @@ describe("Durable Stream Server", () => {
         }),
       );
       expect(resultB).toBe("timeout");
-    });
-
-    await Effect.runPromise(program.pipe(Effect.provide(TestLayer), Effect.scoped));
-  });
+    }),
+  );
 });
