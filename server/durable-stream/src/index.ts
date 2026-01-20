@@ -16,4 +16,4 @@ export * as StreamClient from "./services/stream-client/index.js";
 export { AppLive, ServerLive } from "./server.js";
 
 // SSE utilities
-export * as Sse from "./Sse.js";
+export * as Sse from "./sse.js";

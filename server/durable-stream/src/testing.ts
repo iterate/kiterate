@@ -16,13 +16,14 @@ export interface Subscription<A> {
 }
 
 export const makeSubscription = <A, E>(queue: Queue.Dequeue<Take.Take<A, E>>): Subscription<A> => {
-  const take = Queue.take(queue).pipe(
+  const take: Effect.Effect<A> = Queue.take(queue).pipe(
     Effect.flatMap(Take.done),
     Effect.map((chunk) => Chunk.unsafeHead(chunk)),
-  ) as Effect.Effect<A>;
+    Effect.orDie, // Convert errors to defects - appropriate for test utilities
+  );
 
-  const takeN = (n: number) =>
-    Effect.all(Array.from({ length: n }, () => take)) as Effect.Effect<readonly A[]>;
+  const takeN = (n: number): Effect.Effect<readonly A[]> =>
+    Effect.all(Array.from({ length: n }, () => take));
 
   return { take, takeN };
 };

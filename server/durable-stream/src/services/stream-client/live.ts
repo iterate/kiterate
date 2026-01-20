@@ -2,9 +2,9 @@
  * Live implementation of StreamClient
  */
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 
-import type { Event, EventInput, Offset, StreamPath } from "../../domain.js";
+import { Event, type EventInput, type Offset, type StreamPath } from "../../domain.js";
 import { StreamClient, StreamClientConfig, StreamClientError } from "./service.js";
 
 // -------------------------------------------------------------------------------------
@@ -81,9 +81,16 @@ function parseSSE(chunk: string): Array<Event> {
       // Empty line = end of event
       if (currentEvent === "data") {
         try {
-          events.push(JSON.parse(currentData) as Event);
-        } catch {
-          // Skip malformed JSON
+          const parsed = JSON.parse(currentData);
+          const decoded = Schema.decodeUnknownSync(Event)(parsed);
+          events.push(decoded);
+        } catch (e) {
+          console.warn(
+            "[stream-client] Failed to parse SSE event:",
+            e,
+            "raw:",
+            currentData.slice(0, 200),
+          );
         }
       }
       currentEvent = null;

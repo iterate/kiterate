@@ -12,7 +12,7 @@ import { Effect, Layer, Schema, Stream } from "effect";
 
 import { EventInput, Offset, StreamPath } from "./domain.js";
 import * as StreamManager from "./services/stream-manager/index.js";
-import * as Sse from "./Sse.js";
+import * as Sse from "./sse.js";
 
 // GET /agents/* -> SSE stream
 const subscribeHandler = Effect.gen(function* () {
