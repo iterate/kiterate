@@ -4,18 +4,12 @@
  * Effect-native event streaming infrastructure
  */
 
-// Core stream management
-export {
-  Event,
-  StreamPath,
-  Offset,
-  Payload,
-  StreamStorageService,
-  DurableStreamManager,
-  InMemoryDurableStreamManager,
-} from "./DurableStreamManager.js";
+// Domain types
+export { Event, Offset, Payload, StreamPath } from "./domain.js";
 
-export type { DurableIterateStream, StreamStorage } from "./DurableStreamManager.js";
+// Services
+export * as StreamStorage from "./services/stream-storage/index.js";
+export * as StreamManager from "./services/stream-manager/index.js";
 
 // HTTP server
 export { AppLive, ServerLive } from "./server.js";

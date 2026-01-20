@@ -3,12 +3,14 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
-import { InMemoryDurableStreamManager } from "./DurableStreamManager.js";
 import { AppLive } from "./server.js";
+import { liveLayer as streamManagerLiveLayer } from "./services/stream-manager/live.js";
+import * as StreamStorage from "./services/stream-storage/index.js";
 
-const TestLayer = Layer.merge(
+const testLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(InMemoryDurableStreamManager),
+    Layer.provide(streamManagerLiveLayer),
+    Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),
   ),
   NodeHttpServer.layerTest,
@@ -17,7 +19,7 @@ const TestLayer = Layer.merge(
 const test = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
   it.scopedLive(name, () =>
     //
-    effect.pipe(Effect.timeout("500 millis"), Effect.provide(TestLayer)),
+    effect.pipe(Effect.timeout("500 millis"), Effect.provide(testLayer)),
   );
 
 // Raw HTTP SSE requires fork pattern - Stream.toQueue doesn't work with raw HTTP streams

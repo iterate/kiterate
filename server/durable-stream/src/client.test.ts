@@ -5,14 +5,16 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Scope } from "effect";
 
-import { InMemoryDurableStreamManager } from "./DurableStreamManager.js";
 import { AppLive } from "./server.js";
+import { liveLayer as streamManagerLiveLayer } from "./services/stream-manager/live.js";
+import * as StreamStorage from "./services/stream-storage/index.js";
 import { StreamClient, layer as StreamClientLayer } from "./StreamClient.js";
 import { subscribeClient } from "./testing.js";
 
-const TestLayer = Layer.merge(
+const testLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(InMemoryDurableStreamManager),
+    Layer.provide(streamManagerLiveLayer),
+    Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),
   ),
   StreamClientLayer({ baseUrl: "" }).pipe(Layer.provide(NodeHttpServer.layerTest)),
@@ -20,7 +22,7 @@ const TestLayer = Layer.merge(
 
 const test = <A, E>(name: string, effect: Effect.Effect<A, E, StreamClient | Scope.Scope>) =>
   it.live(name, () =>
-    effect.pipe(Effect.timeout("2 seconds"), Effect.provide(TestLayer), Effect.scoped),
+    effect.pipe(Effect.timeout("2 seconds"), Effect.provide(testLayer), Effect.scoped),
   );
 
 describe("StreamClient", () => {

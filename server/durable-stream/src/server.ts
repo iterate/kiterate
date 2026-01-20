@@ -1,16 +1,17 @@
 import { createServer } from "node:http";
 
 import {
+  HttpMiddleware,
   HttpRouter,
   HttpServer,
   HttpServerRequest,
   HttpServerResponse,
-  HttpMiddleware,
 } from "@effect/platform";
 import { NodeHttpServer } from "@effect/platform-node";
 import { Effect, Layer, Schema, Stream } from "effect";
 
-import { DurableStreamManager, StreamPath, Payload } from "./DurableStreamManager.js";
+import { Payload, StreamPath } from "./domain.js";
+import * as StreamManager from "./services/stream-manager/index.js";
 import * as Sse from "./Sse.js";
 
 // GET /agents/* -> SSE stream
@@ -18,7 +19,7 @@ const subscribeHandler = Effect.gen(function* () {
   const req = yield* HttpServerRequest.HttpServerRequest;
   const rawPath = req.url.replace(/^\/agents\//, "").split("?")[0];
   const path = StreamPath.make(rawPath);
-  const manager = yield* DurableStreamManager;
+  const manager = yield* StreamManager.StreamManager;
 
   const stream = manager.subscribe({ path, live: true }).pipe(Stream.map(Sse.data));
 
@@ -33,7 +34,7 @@ const appendHandler = Effect.gen(function* () {
   const body = yield* req.json;
   const payload = yield* Schema.decodeUnknown(Payload)(body);
 
-  const manager = yield* DurableStreamManager;
+  const manager = yield* StreamManager.StreamManager;
   yield* manager.append({ path, payload });
 
   return HttpServerResponse.empty({ status: 204 });

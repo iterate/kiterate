@@ -3,8 +3,8 @@
  */
 import { Chunk, Effect, Queue, Stream, Take } from "effect";
 
-import { Event } from "./DurableStreamManager.js";
-import { StreamClient } from "./StreamClient.js";
+import type { Event } from "./domain.js";
+import { StreamClient, StreamClientError } from "./StreamClient.js";
 
 // -------------------------------------------------------------------------------------
 // Subscription helper - wraps a queue with take/takeN methods
@@ -35,8 +35,8 @@ export const makeSubscription = <A, E>(queue: Queue.Dequeue<Take.Take<A, E>>): S
 export const subscribeClient = (path: string) =>
   Effect.gen(function* () {
     const client = yield* StreamClient;
-    const stream: Stream.Stream<Event, Error> = client.subscribe(path);
-    const queue: Queue.Dequeue<Take.Take<Event, Error>> = yield* Stream.toQueue(stream);
+    const stream: Stream.Stream<Event, StreamClientError> = client.subscribe(path);
+    const queue: Queue.Dequeue<Take.Take<Event, StreamClientError>> = yield* Stream.toQueue(stream);
     yield* Effect.sleep("10 millis");
     return makeSubscription(queue);
   });

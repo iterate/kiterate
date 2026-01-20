@@ -4,9 +4,21 @@
  * Platform-agnostic: provide NodeHttpClient.layer (CLI) or FetchHttpClient.layer (browser)
  */
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Context, Effect, Layer, Stream } from "effect";
+import { Context, Effect, Layer, Schema, Stream } from "effect";
 
-import type { Event } from "./DurableStreamManager.js";
+import type { Event } from "./domain.js";
+
+// -------------------------------------------------------------------------------------
+// Errors
+// -------------------------------------------------------------------------------------
+
+export class StreamClientError extends Schema.TaggedError<StreamClientError>()(
+  "StreamClientError",
+  {
+    operation: Schema.Literal("subscribe", "append"),
+    cause: Schema.Unknown,
+  },
+) {}
 
 // -------------------------------------------------------------------------------------
 // Service definition
@@ -20,8 +32,11 @@ export interface StreamClientConfig {
 export class StreamClient extends Context.Tag("@app/StreamClient")<
   StreamClient,
   {
-    readonly subscribe: (path: string) => Stream.Stream<Event, Error>;
-    readonly append: (path: string, event: Record<string, unknown>) => Effect.Effect<void, Error>;
+    readonly subscribe: (path: string) => Stream.Stream<Event, StreamClientError>;
+    readonly append: (
+      path: string,
+      event: Record<string, unknown>,
+    ) => Effect.Effect<void, StreamClientError>;
   }
 >() {}
 
@@ -33,15 +48,21 @@ export const make = (config: StreamClientConfig) =>
   Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient;
 
-    const subscribe = (path: string): Stream.Stream<Event, Error> =>
+    const subscribe = (path: string): Stream.Stream<Event, StreamClientError> =>
       Stream.unwrap(
         Effect.gen(function* () {
           const response = yield* client.execute(
             HttpClientRequest.get(`${config.baseUrl}/agents/${path}`),
           );
 
-          return response.stream.pipe(Stream.decodeText(), Stream.mapConcat(parseSSE));
-        }).pipe(Effect.mapError((e) => new Error(`Subscribe failed: ${e}`))),
+          return response.stream.pipe(
+            Stream.mapError((cause) => StreamClientError.make({ operation: "subscribe", cause })),
+            Stream.decodeText(),
+            Stream.mapConcat(parseSSE),
+          );
+        }).pipe(
+          Effect.mapError((cause) => StreamClientError.make({ operation: "subscribe", cause })),
+        ),
       );
 
     const append = (path: string, event: Record<string, unknown>) =>
@@ -53,7 +74,7 @@ export const make = (config: StreamClientConfig) =>
         )
         .pipe(
           Effect.asVoid,
-          Effect.mapError((e) => new Error(`Append failed: ${e}`)),
+          Effect.mapError((cause) => StreamClientError.make({ operation: "append", cause })),
         );
 
     return { subscribe, append };

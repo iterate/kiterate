@@ -23,16 +23,16 @@ Never guess at Effect patterns - check the guide or `.reference/effect/` first.
 
 ## TypeScript Practices
 
-**Avoid type casts (`as`) at all costs.** Use proper schema decoding instead:
+- **No type casts (`as`)** - use Schema decoding or type guards instead
+- **Use `.make()` not `new`** for Schema classes (use `Schema.TaggedError` not `Data.TaggedError`)
 
-```ts
-// BAD: casting unknown data
-const body = yield * req.json;
-const event = Event.make(body as Record<string, unknown>);
+## Effect Naming Conventions
 
-// GOOD: decode with schema validation
-const body = yield * req.json;
-const event = yield * Schema.decodeUnknown(Event)(body);
-```
-
-If you find yourself reaching for `as`, there's almost always a better approach using Schema, type guards, or refining the types upstream.
+- **Layer names**: camelCase ending with `Layer` (e.g., `inMemoryLayer`, `liveLayer`)
+- **File names**: camelCase (e.g., `inMemory.ts`, `fileSystem.ts`, `live.ts`)
+- **Namespace imports** for service modules:
+  ```ts
+  import * as StreamStorage from "./services/stream-storage/index.js";
+  // then: StreamStorage.inMemoryLayer, StreamStorage.StreamStorageService
+  ```
+- **Service folder pattern**: `service.ts` for definitions, layer files import from service, `index.ts` re-exports all

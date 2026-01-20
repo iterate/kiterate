@@ -7,21 +7,19 @@ import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
 import { Offset, StreamPath } from "../../domain.js";
-import { FileSystemLayer } from "./FileSystem.js";
-import { InMemoryLayer } from "./InMemory.js";
-import { StreamStorageService } from "./index.js";
+import * as StreamStorage from "./index.js";
 
 /**
  * Shared test suite for StreamStorage implementations
  */
 const streamStorageTests = <E>(
   name: string,
-  makeLayer: () => Layer.Layer<StreamStorageService, E>,
+  makeLayer: () => Layer.Layer<StreamStorage.StreamStorage, E>,
 ) => {
   describe(name, () => {
     it.effect("append returns event with offset", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/append");
 
         const event = yield* storage.append({ path, payload: { message: "hello" } });
@@ -33,7 +31,7 @@ const streamStorageTests = <E>(
 
     it.effect("append increments offset", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/increment");
 
         const e1 = yield* storage.append({ path, payload: { n: 1 } });
@@ -48,7 +46,7 @@ const streamStorageTests = <E>(
 
     it.effect("read returns all stored events", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/read");
 
         yield* storage.append({ path, payload: { n: 1 } });
@@ -65,7 +63,7 @@ const streamStorageTests = <E>(
 
     it.effect("read with from filters events", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/filter");
 
         yield* storage.append({ path, payload: { n: 0 } });
@@ -85,7 +83,7 @@ const streamStorageTests = <E>(
 
     it.effect("read from empty stream returns empty", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const path = StreamPath.make("test/empty");
 
         const events = yield* storage.read({ path }).pipe(Stream.runCollect);
@@ -96,7 +94,7 @@ const streamStorageTests = <E>(
 
     it.effect("different paths are independent", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const pathA = StreamPath.make("test/a");
         const pathB = StreamPath.make("test/b");
 
@@ -113,7 +111,7 @@ const streamStorageTests = <E>(
 
     it.effect("offsets are independent per path", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorageService;
+        const storage = yield* StreamStorage.StreamStorage;
         const pathA = StreamPath.make("test/offset-a");
         const pathB = StreamPath.make("test/offset-b");
 
@@ -136,16 +134,16 @@ const streamStorageTests = <E>(
 
 describe("StreamStorage", () => {
   // In-memory implementation
-  streamStorageTests("InMemory", () => InMemoryLayer);
+  streamStorageTests("InMemory", () => StreamStorage.inMemoryLayer);
 
   // FileSystem implementation - uses scoped temp directory that auto-cleans
-  const FileSystemTestLayer = Layer.unwrapScoped(
+  const fileSystemTestLayer = Layer.unwrapScoped(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const tempDir = yield* fs.makeTempDirectoryScoped();
-      return FileSystemLayer(tempDir);
+      return StreamStorage.fileSystemLayer(tempDir);
     }),
   ).pipe(Layer.provide(NodeContext.layer));
 
-  streamStorageTests("FileSystem", () => FileSystemTestLayer);
+  streamStorageTests("FileSystem", () => fileSystemTestLayer);
 });
