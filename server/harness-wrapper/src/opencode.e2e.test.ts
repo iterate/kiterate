@@ -74,6 +74,7 @@ interface SSEEvent {
           content?: string;
           parts?: Array<{ type: string; text?: string }>;
         };
+        part?: { type: string; text?: string };
         [key: string]: unknown;
       };
       [key: string]: unknown;

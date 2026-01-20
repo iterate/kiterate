@@ -250,10 +250,10 @@ describe("piReducer (inner, typed)", () => {
       ...createInitialPiState(),
       feed: [
         {
-          kind: "tool",
+          kind: "tool" as const,
           toolCallId: "tc2",
           toolName: "read",
-          state: "pending",
+          state: "pending" as const,
           input: { path: "/tmp/demo.txt" },
           startTimestamp: Date.now(),
         },

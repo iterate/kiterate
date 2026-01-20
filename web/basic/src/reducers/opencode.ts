@@ -62,7 +62,6 @@ interface OpenCodeEvent {
       output?: unknown;
       result?: unknown;
       isError?: boolean;
-      state?: string;
       error?: { message?: string } | string;
     };
     file?: string;
