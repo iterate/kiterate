@@ -1,6 +1,5 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai";
-import { NodeHttpClient } from "@effect/platform-node";
-import { NodeRuntime } from "@effect/platform-node";
+import { NodeContext, NodeHttpClient, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
 import { ServerLive } from "./server.js";
@@ -18,10 +17,14 @@ const OpenAiLive = OpenAiClient.layerConfig({
 // Language model using gpt-4o
 const LanguageModelLive = OpenAiLanguageModel.model("gpt-4o").pipe(Layer.provide(OpenAiLive));
 
+const StreamStorageLive = StreamStorage.fileSystemLayer(".data/streams").pipe(
+  Layer.provide(NodeContext.layer),
+);
+
 const MainLive = ServerLive(port).pipe(
   Layer.provide(AgentManager.liveLayer),
   Layer.provide(StreamManager.liveLayer),
-  Layer.provide(StreamStorage.inMemoryLayer),
+  Layer.provide(StreamStorageLive),
   Layer.provide(LanguageModelLive),
 );
 
