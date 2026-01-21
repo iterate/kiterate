@@ -19,16 +19,18 @@ import { SimpleConsumer, toLayer } from "./simple-consumer.js";
 // -------------------------------------------------------------------------------------
 
 type State = {
-  active: boolean;
+  enabled: boolean;
   lastOffset: Offset;
   history: Array<Prompt.MessageEncoded>;
+  shouldSendLlmRequest: boolean;
   llmRequestStartedAt: Option.Option<Offset>;
 };
 
 const initialState: State = {
-  active: false,
+  enabled: false,
   lastOffset: Offset.make("-1"),
   history: [],
+  shouldSendLlmRequest: false,
   llmRequestStartedAt: Option.none(),
 };
 
@@ -44,26 +46,24 @@ const reduce = (state: State, event: Event): State => {
   // Config change
   const modelChange = AiModelType.fromEventInput(event);
   if (Option.isSome(modelChange)) {
-    return { ...base, active: modelChange.value === "openai" };
+    return { ...base, enabled: modelChange.value === "openai" };
   }
 
-  // User message - add to history
-  // Make parse.
+  // User message - add to history and mark for LLM request
   if (event.type === "iterate:agent:action:send-user-message:called") {
     const content = event.payload["content"];
     if (typeof content === "string") {
       return {
         ...base,
         history: [...state.history, { role: "user", content }],
+        shouldSendLlmRequest: true,
       };
-    } else {
-      throw new Error("I hate typescript");
     }
   }
 
   // Request lifecycle events
   if (event.type === "iterate:openai:request-started") {
-    return { ...base, llmRequestStartedAt: Option.some(event.offset) };
+    return { ...base, shouldSendLlmRequest: false, llmRequestStartedAt: Option.some(event.offset) };
   }
   if (event.type === "iterate:openai:request-ended") {
     return { ...base, llmRequestStartedAt: Option.none() };
@@ -99,11 +99,6 @@ const reduce = (state: State, event: Event): State => {
   return base;
 };
 
-/** Check if event is a user prompt we should respond to */
-const isUserPrompt = (event: Event): boolean =>
-  event.type === "iterate:agent:action:send-user-message:called" &&
-  typeof event.payload["content"] === "string";
-
 // -------------------------------------------------------------------------------------
 // Consumer
 // -------------------------------------------------------------------------------------
@@ -119,7 +114,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
       let state = yield* stream.read().pipe(Stream.runFold(initialState, reduce));
 
       yield* Effect.log(
-        `hydrated, lastOffset=${state.lastOffset}, active=${state.active}, history=${state.history.length} messages`,
+        `hydrated, lastOffset=${state.lastOffset}, enabled=${state.enabled}, history=${state.history.length} messages`,
       );
 
       // Phase 2: Subscribe to live events
@@ -128,8 +123,9 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
           Effect.gen(function* () {
             state = reduce(state, event);
 
-            if (!state.active) return;
-            if (!isUserPrompt(event)) return;
+            if (!state.enabled) return;
+            if (!state.shouldSendLlmRequest) return;
+            // So say if there is an ongoing LLM request, cancel it.
 
             yield* Effect.log(`triggering generation, history=${state.history.length} messages`);
 

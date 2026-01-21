@@ -134,9 +134,11 @@ Storage.read()     PubSub.subscribe()
 | ----------------------------------------------- | ---------------------------------------------------------- |
 | `iterate:agent:config:set`                      | Switch AI model (`payload.model: "openai" \| "grok"`)      |
 | `iterate:agent:action:send-user-message:called` | User message, triggers AI                                  |
-| `iterate:openai:response:sse`                   | OpenAI streaming response chunk                            |
+| `iterate:openai:request-started`                | LLM request initiated                                      |
+| `iterate:openai:response:sse`                   | OpenAI streaming response chunk (text-delta, finish, etc.) |
+| `iterate:openai:request-ended`                  | LLM request completed successfully                         |
+| `iterate:openai:request-cancelled`              | LLM request failed or interrupted                          |
 | `iterate:grok:response:sse`                     | Grok streaming response event                              |
-| `iterate:ai:error`                              | AI error (unsupported input, connection/generation failed) |
 
 ## Storage Format
 
@@ -159,6 +161,59 @@ version: "1"
 ```
 
 Offset counter tracked separately in `.data/streams/{path}.yaml.offset`.
+
+## Debugging Sessions
+
+Sessions are stored as human-readable YAML in `.data/streams/`. Each path maps to a file.
+
+### Quick Commands
+
+```bash
+# View a session's full event log
+cat .data/streams/{path}.yaml
+
+# List all sessions
+ls .data/streams/*.yaml
+
+# Count events by type in a session
+grep "^type:" .data/streams/{path}.yaml | sort | uniq -c
+
+# Extract just the conversation text (user + assistant)
+grep -A1 "content:" .data/streams/{path}.yaml   # user messages
+grep -A1 "delta:" .data/streams/{path}.yaml     # assistant deltas
+
+# Find sessions with errors
+grep -l "request-cancelled" .data/streams/*.yaml
+
+# Watch a session live (while server is running)
+tail -f .data/streams/{path}.yaml
+```
+
+### Event Lifecycle
+
+A typical request flow in the YAML:
+
+```
+request-started (offset N)
+  ↓
+response:sse (response-metadata)
+response:sse (text-start)
+response:sse (text-delta) × N
+response:sse (text-end)
+response:sse (finish)
+  ↓
+request-ended (offset M)
+```
+
+If something goes wrong, you'll see `request-cancelled` instead of `request-ended`.
+
+### Checking History
+
+The `finish` event includes token usage - compare `inputTokens` across requests to verify history is accumulating:
+
+```bash
+grep -A5 "type: finish" .data/streams/{path}.yaml | grep inputTokens
+```
 
 ## Service Patterns
 
