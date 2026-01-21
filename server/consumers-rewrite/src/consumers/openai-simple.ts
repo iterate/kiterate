@@ -86,7 +86,7 @@ const reduce = (state: State, event: Event): State => {
     // Append text delta directly to history
     const textDelta = decodeTextDelta(event.payload.part);
     if (Option.isSome(textDelta)) {
-      const last = state.history.at(-1) as Prompt.MessageEncoded | undefined;
+      const last = state.history.at(-1);
       if (last?.role === "assistant") {
         return State.make({
           ...base,
