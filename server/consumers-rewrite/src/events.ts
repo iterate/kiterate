@@ -14,7 +14,8 @@ interface EventSchema<Type extends string, P> {
   readonly make: {} extends P ? (payload?: P) => EventInput : (payload: P) => EventInput;
   readonly decodeOption: (event: EventInput | Event) => Option.Option<P>;
   readonly decode: (event: EventInput | Event) => Effect.Effect<P, ParseResult.ParseError>;
-  readonly is: (event: EventInput | Event) => event is EventInput & { payload: P };
+  /** Type guard that includes the discriminant for proper narrowing, preserving Event vs EventInput */
+  readonly is: <E extends EventInput | Event>(event: E) => event is E & { type: Type; payload: P };
 }
 
 export const EventSchema = {
@@ -57,7 +58,7 @@ export const EventSchema = {
         }
         return decodePayload(event.payload);
       },
-      is: (event): event is EventInput & { payload: P } =>
+      is: <E extends EventInput | Event>(event: E): event is E & { type: Type; payload: P } =>
         String(event.type) === type && isPayload(event.payload),
     };
   },
