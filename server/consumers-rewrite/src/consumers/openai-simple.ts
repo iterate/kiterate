@@ -113,7 +113,7 @@ const reduce = (state: State, event: Event): State => {
 // Consumer
 // -------------------------------------------------------------------------------------
 
-const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
+export const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
   name: "openai",
 
   run: (stream) =>
