@@ -15,26 +15,38 @@ import { AiModelType } from "../services/ai-client/index.js";
 import { SimpleConsumer, toLayer } from "./simple-consumer.js";
 
 // -------------------------------------------------------------------------------------
-// Types
+// State
 // -------------------------------------------------------------------------------------
 
-type State = {
-  enabled: boolean;
-  lastOffset: Offset;
-  history: Array<Prompt.MessageEncoded>;
+class State extends Schema.Class<State>("OpenAiConsumer/State")({
+  enabled: Schema.Boolean,
+  lastOffset: Offset,
+  history: Schema.Array(Schema.Any),
   /** Offset of most recent user message requiring LLM response */
-  llmRequestRequiredFrom: Option.Option<Offset>;
+  llmRequestRequiredFrom: Schema.Option(Offset),
   /** Offset of most recent request-started (never cleared, used for trigger comparison) */
-  llmLastRespondedAt: Option.Option<Offset>;
-};
+  llmLastRespondedAt: Schema.Option(Offset),
+}) {
+  static initial = State.make({
+    enabled: false,
+    lastOffset: Offset.make("-1"),
+    history: [],
+    llmRequestRequiredFrom: Option.none(),
+    llmLastRespondedAt: Option.none(),
+  });
 
-const initialState: State = {
-  enabled: false,
-  lastOffset: Offset.make("-1"),
-  history: [],
-  llmRequestRequiredFrom: Option.none(),
-  llmLastRespondedAt: Option.none(),
-};
+  /** True if there's a user message newer than our last response */
+  get shouldTriggerLlmResponse(): boolean {
+    return Option.match(this.llmRequestRequiredFrom, {
+      onNone: () => false,
+      onSome: (requiredFrom) =>
+        Option.match(this.llmLastRespondedAt, {
+          onNone: () => true,
+          onSome: (respondedAt) => Offset.gt(requiredFrom, respondedAt),
+        }),
+    });
+  }
+}
 
 const decodeTextDelta = Schema.decodeUnknownOption(Response.TextDeltaPart);
 
@@ -48,24 +60,24 @@ const reduce = (state: State, event: Event): State => {
   // Config change
   const modelChange = AiModelType.fromEventInput(event);
   if (Option.isSome(modelChange)) {
-    return { ...base, enabled: modelChange.value === "openai" };
+    return State.make({ ...base, enabled: modelChange.value === "openai" });
   }
 
   // User message - add to history and mark offset as pending
   if (event.type === "iterate:agent:action:send-user-message:called") {
     const content = event.payload["content"];
     if (typeof content === "string") {
-      return {
+      return State.make({
         ...base,
         history: [...state.history, { role: "user", content }],
         llmRequestRequiredFrom: Option.some(event.offset),
-      };
+      });
     }
   }
 
   // Request started - track that we've responded to the current user message
   if (event.type === "iterate:openai:request-started") {
-    return { ...base, llmLastRespondedAt: Option.some(event.offset) };
+    return State.make({ ...base, llmLastRespondedAt: Option.some(event.offset) });
   }
   // request-ended and request-cancelled don't affect state
   // (in-flight tracking is handled by currentFiber locally)
@@ -77,24 +89,24 @@ const reduce = (state: State, event: Event): State => {
     // Append text delta directly to history
     const textDelta = decodeTextDelta(part);
     if (Option.isSome(textDelta)) {
-      const last = state.history.at(-1);
+      const last = state.history.at(-1) as Prompt.MessageEncoded | undefined;
       if (last?.role === "assistant") {
-        return {
+        return State.make({
           ...base,
           history: [
             ...state.history.slice(0, -1),
             { ...last, content: last.content + textDelta.value.delta },
           ],
-        };
+        });
       }
-      return {
+      return State.make({
         ...base,
         history: [...state.history, { role: "assistant", content: textDelta.value.delta }],
-      };
+      });
     }
   }
 
-  return base;
+  return State.make(base);
 };
 
 // -------------------------------------------------------------------------------------
@@ -109,7 +121,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
       const lm = yield* LanguageModel.LanguageModel;
 
       // Phase 1: Hydrate from history
-      let state = yield* stream.read().pipe(Stream.runFold(initialState, reduce));
+      let state = yield* stream.read().pipe(Stream.runFold(State.initial, reduce));
 
       yield* Effect.log(
         `hydrated, lastOffset=${state.lastOffset}, enabled=${state.enabled}, history=${state.history.length} messages, pending=${Option.getOrNull(state.llmRequestRequiredFrom)}`,
@@ -125,17 +137,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
             state = reduce(state, event);
 
             if (!state.enabled) return;
-
-            // Trigger if there's a user message newer than our last request-started
-            const shouldTriggerLlmResponse = Option.match(state.llmRequestRequiredFrom, {
-              onNone: () => false,
-              onSome: (requiredFrom) =>
-                Option.match(state.llmLastRespondedAt, {
-                  onNone: () => true,
-                  onSome: (startedAt) => Offset.gt(requiredFrom, startedAt),
-                }),
-            });
-            if (!shouldTriggerLlmResponse) return;
+            if (!state.shouldTriggerLlmResponse) return;
 
             yield* Effect.log(`triggering generation, history=${state.history.length} messages`);
 
