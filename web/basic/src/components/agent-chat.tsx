@@ -157,7 +157,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [sendError, setSendError] = useState<string | null>(null);
   const [selectedRawEventIndex, setSelectedRawEventIndex] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("message");
-  const [aiModel, setAiModel] = useState<AiModelType>("openai");
+  const [aiModel, setAiModel] = useState<AiModelType | null>(null);
   const { displayMode, setRawEventsCount } = useRawMode();
 
   const jsonTemplate = useMemo(
@@ -214,13 +214,20 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   // Sync AI model selector with configured model from stream history
   useEffect(() => {
+    console.log(
+      "[agent-chat] configuredModel changed:",
+      configuredModel,
+      "current aiModel:",
+      aiModel,
+    );
     if (configuredModel) {
       setAiModel(configuredModel);
     }
   }, [configuredModel]);
 
   const isStreaming = stateIsStreaming || hookIsStreaming;
-  const isDisabled = sending;
+  const noModelSelected = aiModel === null;
+  const isDisabled = sending || noModelSelected;
   const resizeBehavior = useMemo(() => ({ mass: 1, damping: 45, stiffness: 320 }), []);
 
   // Notify parent of connection status changes
@@ -256,17 +263,21 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     setSendError(null);
   };
 
-  // Handle AI model change
+  // Handle AI model change - always sends config event to server
   const handleModelChange = async (model: AiModelType) => {
+    const previousModel = aiModel;
     setAiModel(model);
     setSendError(null);
     try {
       const result = await sendConfigEvent(apiURL, agentPath, model);
       if (!result.ok) {
         setSendError(result.error ?? `Failed to switch to ${model}`);
+        // Revert on error
+        setAiModel(previousModel);
       }
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Failed to switch model");
+      setAiModel(previousModel);
     }
   };
 
@@ -349,6 +360,14 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
       </Conversation>
 
       <footer className="p-4 border-t space-y-3">
+        {/* Model selection prompt */}
+        {noModelSelected && (
+          <div className="flex items-center gap-2 p-3 text-sm text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md">
+            <AlertCircleIcon className="size-4 shrink-0" />
+            <span>Select an AI model above to start chatting</span>
+          </div>
+        )}
+
         {/* Error display */}
         {sendError && (
           <div className="flex items-center gap-2 p-3 text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-md">
@@ -380,9 +399,14 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
                 </TabsTrigger>
               </TabsList>
             </Tabs>
-            <Select value={aiModel} onValueChange={(v) => handleModelChange(v as AiModelType)}>
-              <SelectTrigger className="h-8 w-[110px] text-xs">
-                <SelectValue placeholder="Model" />
+            <Select
+              value={aiModel ?? ""}
+              onValueChange={(v) => handleModelChange(v as AiModelType)}
+            >
+              <SelectTrigger
+                className={`h-8 w-[130px] text-xs ${noModelSelected ? "border-amber-500 animate-pulse" : ""}`}
+              >
+                <SelectValue placeholder="Select model..." />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="openai">OpenAI</SelectItem>
