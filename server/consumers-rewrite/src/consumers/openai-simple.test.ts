@@ -1,6 +1,6 @@
 import { LanguageModel, Response } from "@effect/ai";
 import { it, expect } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Queue, Stream } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
 import { SimpleStream } from "./simple-consumer.js";
@@ -20,23 +20,47 @@ interface MockLanguageModelControl {
 }
 
 export const makeMockLanguageModel = Effect.gen(function* () {
-  const queue = yield* Queue.unbounded<StreamPart | null | Error>();
-  const called = yield* Deferred.make<void>();
+  // Mutable state - using let since we're in a closure
+  let callCount = 0;
+  const callWaiters: Deferred.Deferred<void>[] = [];
+  let currentQueue: Queue.Queue<StreamPart> | null = null;
+  let currentCompletion: Deferred.Deferred<void> | null = null;
 
   const control: MockLanguageModelControl = {
-    emit: (part) => Queue.offer(queue, part),
-    complete: () => Queue.offer(queue, null),
-    fail: (error) => Queue.offer(queue, error),
-    waitForCall: () => Deferred.await(called),
+    emit: (part) => (currentQueue ? Queue.offer(currentQueue, part) : Effect.void),
+    complete: () => (currentCompletion ? Deferred.succeed(currentCompletion, void 0) : Effect.void),
+    fail: (_error) =>
+      currentCompletion ? Deferred.succeed(currentCompletion, void 0) : Effect.void, // TODO: proper stream failure
+    waitForCall: () =>
+      Effect.gen(function* () {
+        // If we've already had more calls than waiters, return immediately
+        if (callCount > callWaiters.length) return;
+        // Otherwise create a waiter for the next call
+        const deferred = yield* Deferred.make<void>();
+        callWaiters.push(deferred);
+        yield* Deferred.await(deferred);
+      }),
   };
 
   const lm: LanguageModel.Service = {
-    streamText: () => {
-      Deferred.unsafeDone(called, Exit.void);
-      return Stream.fromQueue(queue).pipe(
-        Stream.takeWhile((item): item is StreamPart => item !== null && !(item instanceof Error)),
-      );
-    },
+    streamText: () =>
+      Effect.gen(function* () {
+        // Set up fresh queue and completion for this call
+        const queue = yield* Queue.unbounded<StreamPart>();
+        const completion = yield* Deferred.make<void>();
+        currentQueue = queue;
+        currentCompletion = completion;
+
+        // Increment call count and notify waiters
+        callCount++;
+        const waiter = callWaiters[callCount - 1];
+        if (waiter) yield* Deferred.succeed(waiter, void 0);
+
+        return Stream.fromQueue(queue).pipe(
+          Stream.interruptWhen(Deferred.await(completion)),
+          Stream.onDone(() => Queue.shutdown(queue)),
+        );
+      }).pipe(Stream.unwrap),
     generateText: () => Effect.die("not implemented"),
     generateObject: () => Effect.die("not implemented"),
   };
@@ -54,6 +78,7 @@ interface MockSimpleStreamControl {
   readonly append: (event: EventInput) => Effect.Effect<Event>;
   readonly getEvents: () => Effect.Effect<readonly Event[]>;
   readonly waitForSubscribe: () => Effect.Effect<void>;
+  readonly waitForEventType: (type: EventType) => Effect.Effect<Event>;
 }
 
 export const makeMockSimpleStream = (path: StreamPath) =>
@@ -61,6 +86,7 @@ export const makeMockSimpleStream = (path: StreamPath) =>
     const events: Event[] = [];
     const subscribers = yield* Queue.unbounded<Event>();
     const subscribed = yield* Deferred.make<void>();
+    const waiters = new Map<string, Deferred.Deferred<Event>>();
     let nextOffset = 0;
 
     const makeEvent = (input: EventInput): Event =>
@@ -71,15 +97,37 @@ export const makeMockSimpleStream = (path: StreamPath) =>
         createdAt: DateTime.unsafeNow(),
       });
 
+    const notifyWaiters = (event: Event) =>
+      Effect.gen(function* () {
+        const deferred = waiters.get(event.type);
+        if (deferred) {
+          yield* Deferred.succeed(deferred, event);
+          waiters.delete(event.type);
+        }
+      });
+
     const control: MockSimpleStreamControl = {
       append: (input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           const event = makeEvent(input);
           events.push(event);
+          yield* Queue.offer(subscribers, event);
+          yield* notifyWaiters(event);
           return event;
-        }).pipe(Effect.tap((event) => Queue.offer(subscribers, event))),
+        }),
       getEvents: () => Effect.sync(() => events),
       waitForSubscribe: () => Deferred.await(subscribed),
+      waitForEventType: (type) =>
+        Effect.gen(function* () {
+          // Check if event already exists
+          const existing = events.find((e) => e.type === type);
+          if (existing) return existing;
+
+          // Create a deferred to wait for this event type
+          const deferred = yield* Deferred.make<Event>();
+          waiters.set(type, deferred);
+          return yield* Deferred.await(deferred);
+        }),
     };
 
     const stream: SimpleStream = {
@@ -92,25 +140,28 @@ export const makeMockSimpleStream = (path: StreamPath) =>
         );
       },
 
-      subscribe: (options) => {
-        const snapshot = [...events];
-        Deferred.unsafeDone(subscribed, Exit.void);
-        return Stream.fromIterable(snapshot).pipe(
-          Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
-          Stream.concat(
-            Stream.fromQueue(subscribers).pipe(
-              Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
+      subscribe: (options) =>
+        Effect.gen(function* () {
+          const snapshot = [...events];
+          yield* Deferred.succeed(subscribed, void 0);
+          return Stream.fromIterable(snapshot).pipe(
+            Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
+            Stream.concat(
+              Stream.fromQueue(subscribers).pipe(
+                Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
+              ),
             ),
-          ),
-        );
-      },
+          );
+        }).pipe(Stream.unwrap),
 
       append: (input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           const event = makeEvent(input);
           events.push(event);
+          yield* Queue.offer(subscribers, event);
+          yield* notifyWaiters(event);
           return event.offset;
-        }).pipe(Effect.tap(() => Queue.offer(subscribers, events.at(-1)!))),
+        }),
     };
 
     return { stream, control };
@@ -162,8 +213,8 @@ it.scoped("triggers LLM on user message when enabled", () =>
     } as StreamPart);
     yield* lmControl.complete();
 
-    // Let the consumer finish processing
-    for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
+    // Wait for request-ended event (replaces yieldNow loops)
+    yield* streamControl.waitForEventType(EventType.make("iterate:openai:request-ended"));
 
     // Verify events
     const events = yield* streamControl.getEvents();
