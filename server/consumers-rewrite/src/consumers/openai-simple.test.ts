@@ -1,8 +1,17 @@
 import { Response } from "@effect/ai";
 import { it, expect } from "@effect/vitest";
-import { Effect, Fiber } from "effect";
+import { Effect } from "effect";
 
-import { EventInput, EventType, StreamPath } from "../domain.js";
+import { StreamPath } from "../domain.js";
+import {
+  ConfigSetEvent,
+  UserMessageEvent,
+  RequestStartedEvent,
+  ResponseSseEvent,
+  RequestEndedEvent,
+  RequestInterruptedEvent,
+  RequestCancelledEvent,
+} from "../events.js";
 import { TestLanguageModel, makeTestSimpleStream } from "../testing/index.js";
 import { OpenAiSimpleConsumer } from "./openai-simple.js";
 
@@ -18,12 +27,7 @@ it.scoped("triggers LLM on user message when enabled", () =>
     const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
     // Enable openai model
-    yield* stream.appendEvent(
-      EventInput.make({
-        type: EventType.make("iterate:agent:config:set"),
-        payload: { model: "openai" },
-      }),
-    );
+    yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
 
     // Fork the consumer
     yield* OpenAiSimpleConsumer.run(stream).pipe(Effect.forkScoped);
@@ -32,12 +36,7 @@ it.scoped("triggers LLM on user message when enabled", () =>
     yield* stream.waitForSubscribe();
 
     // Send a user message
-    yield* stream.appendEvent(
-      EventInput.make({
-        type: EventType.make("iterate:agent:action:send-user-message:called"),
-        payload: { content: "Hello!" },
-      }),
-    );
+    yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
 
     // Wait for LLM to be called
     yield* lm.waitForCall();
@@ -51,18 +50,18 @@ it.scoped("triggers LLM on user message when enabled", () =>
     } as StreamPart);
     yield* lm.complete();
 
-    // Wait for request-ended event (replaces yieldNow loops)
-    yield* stream.waitForEventType(EventType.make("iterate:openai:request-ended"));
+    // Wait for request-ended event
+    yield* stream.waitForEventType(RequestEndedEvent.type);
 
     // Verify events
     const events = yield* stream.getEvents();
     const eventTypes = events.map((e) => e.type);
 
-    expect(eventTypes).toContain("iterate:agent:config:set");
-    expect(eventTypes).toContain("iterate:agent:action:send-user-message:called");
-    expect(eventTypes).toContain("iterate:openai:request-started");
-    expect(eventTypes).toContain("iterate:openai:response:sse");
-    expect(eventTypes).toContain("iterate:openai:request-ended");
+    expect(eventTypes).toContain(ConfigSetEvent.typeString);
+    expect(eventTypes).toContain(UserMessageEvent.typeString);
+    expect(eventTypes).toContain(RequestStartedEvent.typeString);
+    expect(eventTypes).toContain(ResponseSseEvent.typeString);
+    expect(eventTypes).toContain(RequestEndedEvent.typeString);
   }).pipe(Effect.provide(TestLanguageModel.layer)),
 );
 
@@ -72,24 +71,14 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
     const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
     // Enable openai model
-    yield* stream.appendEvent(
-      EventInput.make({
-        type: EventType.make("iterate:agent:config:set"),
-        payload: { model: "openai" },
-      }),
-    );
+    yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
 
     // Fork the consumer
     yield* OpenAiSimpleConsumer.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
     // Send first user message
-    yield* stream.appendEvent(
-      EventInput.make({
-        type: EventType.make("iterate:agent:action:send-user-message:called"),
-        payload: { content: "First message" },
-      }),
-    );
+    yield* stream.appendEvent(UserMessageEvent.make({ content: "First message" }));
 
     // Wait for first LLM call
     yield* lm.waitForCall();
@@ -110,10 +99,7 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
 
     // Send second user message while first is still streaming
     yield* stream.appendEvent(
-      EventInput.make({
-        type: EventType.make("iterate:agent:action:send-user-message:called"),
-        payload: { content: "Second message (interrupts first)" },
-      }),
+      UserMessageEvent.make({ content: "Second message (interrupts first)" }),
     );
 
     // Wait for second LLM call (means first was interrupted)
@@ -129,7 +115,7 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
     yield* lm.complete();
 
     // Wait for the second request to end
-    yield* stream.waitForEventType(EventType.make("iterate:openai:request-ended"));
+    yield* stream.waitForEventType(RequestEndedEvent.type);
 
     // Verify events
     const events = yield* stream.getEvents();
@@ -137,18 +123,18 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
 
     // Should have two request-started events
     const requestStartedCount = eventTypes.filter(
-      (t) => t === "iterate:openai:request-started",
+      (t) => t === RequestStartedEvent.typeString,
     ).length;
     expect(requestStartedCount).toBe(2);
 
     // Should have an interrupted event for the first request
-    expect(eventTypes).toContain("iterate:openai:request-interrupted");
+    expect(eventTypes).toContain(RequestInterruptedEvent.typeString);
 
     // Should have a cancelled event (from the fiber interruption)
-    expect(eventTypes).toContain("iterate:openai:request-cancelled");
+    expect(eventTypes).toContain(RequestCancelledEvent.typeString);
 
     // Should have exactly one request-ended (for the second request)
-    const requestEndedCount = eventTypes.filter((t) => t === "iterate:openai:request-ended").length;
+    const requestEndedCount = eventTypes.filter((t) => t === RequestEndedEvent.typeString).length;
     expect(requestEndedCount).toBe(1);
   }).pipe(Effect.provide(TestLanguageModel.layer)),
 );
