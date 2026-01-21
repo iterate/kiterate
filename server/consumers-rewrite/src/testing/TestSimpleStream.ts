@@ -3,22 +3,38 @@
  *
  * Extends SimpleStream with test control methods for inspecting events,
  * waiting for subscription, and waiting for specific event types.
+ *
+ * The wait methods consume events - each call returns the *next* matching event,
+ * not one that was already returned by a previous wait.
  */
-import { DateTime, Deferred, Effect, Queue, Scope, Stream } from "effect";
+import { DateTime, Deferred, Duration, Effect, Queue, Scope, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
 import { SimpleStream } from "../consumers/simple-consumer.js";
 
-/** Minimal interface for EventSchema - just needs type property */
-interface EventSchemaLike {
+/** Default timeout for wait operations */
+const DEFAULT_TIMEOUT = Duration.millis(300);
+
+/** EventSchema interface matching the actual EventSchema from events.ts */
+interface EventSchema<Type extends string, P> {
   readonly type: EventType;
+  readonly typeString: Type;
+  readonly is: <E extends EventInput | Event>(event: E) => event is E & { type: Type; payload: P };
 }
 
-/** Accept either an EventType or an EventSchema */
-type EventTypeOrSchema = EventType | EventSchemaLike;
+/** Infer the payload type from an EventSchema */
+type PayloadOf<S> = S extends EventSchema<string, infer P> ? P : never;
 
-const getEventType = (typeOrSchema: EventTypeOrSchema): EventType =>
-  typeof typeOrSchema === "string" ? typeOrSchema : typeOrSchema.type;
+/** Infer the type string from an EventSchema */
+type TypeOf<S> = S extends EventSchema<infer T, unknown> ? T : never;
+
+/** Typed event result - includes both the narrowed type and payload */
+type TypedEvent<S> = Event & { type: TypeOf<S>; payload: PayloadOf<S> };
+
+/** Options for wait operations */
+interface WaitOptions {
+  readonly timeout?: Duration.DurationInput;
+}
 
 export interface TestSimpleStream extends SimpleStream {
   /** Append an event and return the full Event (not just offset) */
@@ -26,14 +42,18 @@ export interface TestSimpleStream extends SimpleStream {
   /** Get all events that have been appended */
   readonly getEvents: () => Effect.Effect<readonly Event[]>;
   /** Wait until subscribe has been called */
-  readonly waitForSubscribe: () => Effect.Effect<void>;
-  /** Wait for an event of a specific type to be appended (accepts EventType or EventSchema) */
-  readonly waitForEvent: (typeOrSchema: EventTypeOrSchema) => Effect.Effect<Event>;
-  /** Wait for N events of a specific type to be appended */
-  readonly waitForEventCount: (
-    typeOrSchema: EventTypeOrSchema,
+  readonly waitForSubscribe: (options?: WaitOptions) => Effect.Effect<void>;
+  /** Wait for the next event matching the schema (consumes it from the queue) */
+  readonly waitForEvent: <S extends EventSchema<string, unknown>>(
+    schema: S,
+    options?: WaitOptions,
+  ) => Effect.Effect<TypedEvent<S>>;
+  /** Wait for N events matching the schema (consumes them from the queue) */
+  readonly waitForEventCount: <S extends EventSchema<string, unknown>>(
+    schema: S,
     count: number,
-  ) => Effect.Effect<readonly Event[]>;
+    options?: WaitOptions,
+  ) => Effect.Effect<readonly TypedEvent<S>[]>;
 }
 
 export const makeTestSimpleStream = (
@@ -43,13 +63,16 @@ export const makeTestSimpleStream = (
     const events: Event[] = [];
     const subscribers = yield* Queue.unbounded<Event>();
     const subscribed = yield* Deferred.make<void>();
-    // Waiters for single events by type
-    const singleWaiters = new Map<string, Deferred.Deferred<Event>>();
-    // Waiters for count-based events: Map<type, Array<{count, deferred, collected}>>
-    const countWaiters = new Map<
+
+    // Track consumed count per event type - waitForEvent consumes events
+    const consumedCounts = new Map<string, number>();
+
+    // Waiters for events: Map<type, Array<{needed, deferred, collected}>>
+    const waiters = new Map<
       string,
-      Array<{ count: number; deferred: Deferred.Deferred<readonly Event[]>; collected: Event[] }>
+      Array<{ needed: number; deferred: Deferred.Deferred<readonly Event[]>; collected: Event[] }>
     >();
+
     let nextOffset = 0;
 
     const makeEvent = (input: EventInput): Event =>
@@ -63,30 +86,21 @@ export const makeTestSimpleStream = (
     const notifyWaiters = (event: Event) =>
       Effect.gen(function* () {
         const type = String(event.type);
+        const waiterList = waiters.get(type);
+        if (!waiterList) return;
 
-        // Notify single-event waiters
-        const singleDeferred = singleWaiters.get(type);
-        if (singleDeferred) {
-          yield* Deferred.succeed(singleDeferred, event);
-          singleWaiters.delete(type);
+        for (const waiter of waiterList) {
+          waiter.collected.push(event);
+          if (waiter.collected.length >= waiter.needed) {
+            yield* Deferred.succeed(waiter.deferred, waiter.collected);
+          }
         }
-
-        // Notify count-based waiters
-        const countWaiterList = countWaiters.get(type);
-        if (countWaiterList) {
-          for (const waiter of countWaiterList) {
-            waiter.collected.push(event);
-            if (waiter.collected.length >= waiter.count) {
-              yield* Deferred.succeed(waiter.deferred, waiter.collected);
-            }
-          }
-          // Remove completed waiters
-          const remaining = countWaiterList.filter((w) => w.collected.length < w.count);
-          if (remaining.length === 0) {
-            countWaiters.delete(type);
-          } else {
-            countWaiters.set(type, remaining);
-          }
+        // Remove completed waiters
+        const remaining = waiterList.filter((w) => w.collected.length < w.needed);
+        if (remaining.length === 0) {
+          waiters.delete(type);
+        } else {
+          waiters.set(type, remaining);
         }
       });
 
@@ -98,6 +112,65 @@ export const makeTestSimpleStream = (
         yield* notifyWaiters(event);
         return event;
       });
+
+    const withTimeout = <A, E>(
+      effect: Effect.Effect<A, E>,
+      options?: WaitOptions,
+    ): Effect.Effect<A, E> => {
+      const timeout = options?.timeout ?? DEFAULT_TIMEOUT;
+      return effect.pipe(
+        Effect.timeoutFail({
+          duration: timeout,
+          onTimeout: () =>
+            new Error(
+              `Timeout waiting for event after ${Duration.toMillis(Duration.decode(timeout))}ms`,
+            ) as E,
+        }),
+      );
+    };
+
+    const waitForEvents = <S extends EventSchema<string, unknown>>(
+      schema: S,
+      count: number,
+      options?: WaitOptions,
+    ): Effect.Effect<readonly TypedEvent<S>[]> =>
+      withTimeout(
+        Effect.gen(function* () {
+          const type = String(schema.type);
+
+          // Get current consumed count for this type
+          const consumed = consumedCounts.get(type) ?? 0;
+
+          // Find unconsumed events of this type
+          const allOfType = events.filter((e): e is TypedEvent<S> => schema.is(e));
+          const unconsumed = allOfType.slice(consumed);
+
+          if (unconsumed.length >= count) {
+            // We have enough - consume them and return
+            consumedCounts.set(type, consumed + count);
+            return unconsumed.slice(0, count);
+          }
+
+          // Need to wait for more events
+          const needed = count - unconsumed.length;
+          const deferred = yield* Deferred.make<readonly Event[]>();
+          const waiter = {
+            needed: needed + unconsumed.length,
+            deferred,
+            collected: [...unconsumed] as Event[],
+          };
+          const list = waiters.get(type) ?? [];
+          list.push(waiter);
+          waiters.set(type, list);
+
+          const result = yield* Deferred.await(deferred);
+          // Mark all as consumed
+          consumedCounts.set(type, consumed + count);
+          // Filter through schema.is to ensure proper typing
+          return result.slice(0, count).filter((e): e is TypedEvent<S> => schema.is(e));
+        }),
+        options,
+      );
 
     return {
       path,
@@ -129,31 +202,12 @@ export const makeTestSimpleStream = (
       // Test control methods
       appendEvent: appendImpl,
       getEvents: () => Effect.sync(() => events),
-      waitForSubscribe: () => Deferred.await(subscribed),
 
-      waitForEvent: (typeOrSchema) =>
-        Effect.gen(function* () {
-          const type = getEventType(typeOrSchema);
-          const existing = events.find((e) => e.type === type);
-          if (existing) return existing;
-          const deferred = yield* Deferred.make<Event>();
-          singleWaiters.set(String(type), deferred);
-          return yield* Deferred.await(deferred);
-        }),
+      waitForSubscribe: (options) => withTimeout(Deferred.await(subscribed), options),
 
-      waitForEventCount: (typeOrSchema, count) =>
-        Effect.gen(function* () {
-          const type = getEventType(typeOrSchema);
-          const typeStr = String(type);
-          const existing = events.filter((e) => e.type === type);
-          if (existing.length >= count) return existing.slice(0, count);
+      waitForEvent: (schema, options) =>
+        waitForEvents(schema, 1, options).pipe(Effect.map((events) => events[0])),
 
-          const deferred = yield* Deferred.make<readonly Event[]>();
-          const waiter = { count, deferred, collected: [...existing] };
-          const list = countWaiters.get(typeStr) ?? [];
-          list.push(waiter);
-          countWaiters.set(typeStr, list);
-          return yield* Deferred.await(deferred);
-        }),
+      waitForEventCount: waitForEvents,
     };
   });

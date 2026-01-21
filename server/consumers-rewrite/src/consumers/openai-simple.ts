@@ -29,7 +29,7 @@ import { SimpleConsumer, toLayer } from "./simple-consumer.js";
 class State extends Schema.Class<State>("OpenAiConsumer/State")({
   enabled: Schema.Boolean,
   lastOffset: Offset,
-  history: Schema.Array(Schema.Any),
+  history: Schema.Array(Schema.encodedSchema(Prompt.Message)),
   /** Offset of most recent user message requiring LLM response */
   llmRequestRequiredFrom: Schema.Option(Offset),
   /** Offset of most recent request-started (never cleared, used for trigger comparison) */
@@ -45,14 +45,9 @@ class State extends Schema.Class<State>("OpenAiConsumer/State")({
 
   /** True if there's a user message newer than our last response */
   get shouldTriggerLlmResponse(): boolean {
-    return Option.match(this.llmRequestRequiredFrom, {
-      onNone: () => false,
-      onSome: (requiredFrom) =>
-        Option.match(this.llmLastRespondedAt, {
-          onNone: () => true,
-          onSome: (respondedAt) => Offset.gt(requiredFrom, respondedAt),
-        }),
-    });
+    if (Option.isNone(this.llmRequestRequiredFrom)) return false;
+    if (Option.isNone(this.llmLastRespondedAt)) return true;
+    return Offset.gt(this.llmRequestRequiredFrom.value, this.llmLastRespondedAt.value);
   }
 }
 
