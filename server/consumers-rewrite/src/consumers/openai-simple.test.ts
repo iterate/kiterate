@@ -1,9 +1,10 @@
 import { LanguageModel, Response } from "@effect/ai";
 import { it, expect } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Fiber, Layer, Queue, Stream } from "effect";
+import { DateTime, Deferred, Effect, Exit, Fiber, Layer, Queue, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
 import { SimpleStream } from "./simple-consumer.js";
+import { OpenAiSimpleConsumer } from "./openai-simple.js";
 
 // -------------------------------------------------------------------------------------
 // Mock LanguageModel
@@ -12,13 +13,9 @@ import { SimpleStream } from "./simple-consumer.js";
 type StreamPart = Response.StreamPart<{}>;
 
 interface MockLanguageModelControl {
-  /** Emit a stream part to the current streamText call */
   readonly emit: (part: StreamPart) => Effect.Effect<void>;
-  /** Complete the stream successfully */
   readonly complete: () => Effect.Effect<void>;
-  /** Fail the stream */
   readonly fail: (error: Error) => Effect.Effect<void>;
-  /** Wait for streamText to be called */
   readonly waitForCall: () => Effect.Effect<void>;
 }
 
@@ -35,7 +32,7 @@ export const makeMockLanguageModel = Effect.gen(function* () {
 
   const lm: LanguageModel.Service = {
     streamText: () => {
-      Deferred.unsafeDone(called, void 0 as never);
+      Deferred.unsafeDone(called, Exit.void);
       return Stream.fromQueue(queue).pipe(
         Stream.takeWhile((item): item is StreamPart => item !== null && !(item instanceof Error)),
       );
@@ -54,16 +51,16 @@ export const makeMockLanguageModel = Effect.gen(function* () {
 // -------------------------------------------------------------------------------------
 
 interface MockSimpleStreamControl {
-  /** Append an event externally (simulates external writes) */
   readonly append: (event: EventInput) => Effect.Effect<Event>;
-  /** Get all appended events */
   readonly getEvents: () => Effect.Effect<readonly Event[]>;
+  readonly waitForSubscribe: () => Effect.Effect<void>;
 }
 
 export const makeMockSimpleStream = (path: StreamPath) =>
   Effect.gen(function* () {
     const events: Event[] = [];
     const subscribers = yield* Queue.unbounded<Event>();
+    const subscribed = yield* Deferred.make<void>();
     let nextOffset = 0;
 
     const makeEvent = (input: EventInput): Event =>
@@ -82,21 +79,31 @@ export const makeMockSimpleStream = (path: StreamPath) =>
           return event;
         }).pipe(Effect.tap((event) => Queue.offer(subscribers, event))),
       getEvents: () => Effect.sync(() => events),
+      waitForSubscribe: () => Deferred.await(subscribed),
     };
 
     const stream: SimpleStream = {
       path,
 
-      read: (options) =>
-        Stream.fromIterable(events).pipe(
+      read: (options) => {
+        const snapshot = [...events];
+        return Stream.fromIterable(snapshot).pipe(
           Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
-        ),
+        );
+      },
 
-      subscribe: (options) =>
-        Stream.fromIterable(events).pipe(
+      subscribe: (options) => {
+        const snapshot = [...events];
+        Deferred.unsafeDone(subscribed, Exit.void);
+        return Stream.fromIterable(snapshot).pipe(
           Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
-          Stream.concat(Stream.fromQueue(subscribers)),
-        ),
+          Stream.concat(
+            Stream.fromQueue(subscribers).pipe(
+              Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
+            ),
+          ),
+        );
+      },
 
       append: (input) =>
         Effect.sync(() => {
@@ -109,8 +116,6 @@ export const makeMockSimpleStream = (path: StreamPath) =>
     return { stream, control };
   });
 
-import { OpenAiSimpleConsumer } from "./openai-simple.js";
-
 // -------------------------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------------------------
@@ -120,7 +125,7 @@ it.scoped("triggers LLM on user message when enabled", () =>
     const { control: lmControl, layer: lmLayer } = yield* makeMockLanguageModel;
     const { stream, control: streamControl } = yield* makeMockSimpleStream(StreamPath.make("test"));
 
-    // Set up: enable openai model
+    // Enable openai model
     yield* streamControl.append(
       EventInput.make({
         type: EventType.make("iterate:agent:config:set"),
@@ -128,11 +133,14 @@ it.scoped("triggers LLM on user message when enabled", () =>
       }),
     );
 
-    // Fork the consumer (runs in background)
+    // Fork the consumer
     const fiber = yield* OpenAiSimpleConsumer.run(stream).pipe(
       Effect.provide(lmLayer),
       Effect.fork,
     );
+
+    // Wait for consumer to be ready
+    yield* streamControl.waitForSubscribe();
 
     // Send a user message
     yield* streamControl.append(
@@ -145,34 +153,28 @@ it.scoped("triggers LLM on user message when enabled", () =>
     // Wait for LLM to be called
     yield* lmControl.waitForCall();
 
-    // Emit a text delta
+    // Emit a response and complete
     yield* lmControl.emit({
       type: "text-delta",
-      delta: "Hi there!",
+      delta: "Hi!",
       id: "msg1",
       metadata: {},
     } as StreamPart);
-
-    // Complete the stream
     yield* lmControl.complete();
 
-    // Give it a moment to process
-    yield* Effect.sleep("50 millis");
+    // Let the consumer finish processing
+    for (let i = 0; i < 10; i++) yield* Effect.yieldNow();
 
-    // Check what events were appended
+    // Verify events
     const events = yield* streamControl.getEvents();
     const eventTypes = events.map((e) => e.type);
 
-    console.log("Event types:", eventTypes);
-
-    // Should have: config, user-message, request-started, response:sse, request-ended
     expect(eventTypes).toContain("iterate:agent:config:set");
     expect(eventTypes).toContain("iterate:agent:action:send-user-message:called");
     expect(eventTypes).toContain("iterate:openai:request-started");
     expect(eventTypes).toContain("iterate:openai:response:sse");
     expect(eventTypes).toContain("iterate:openai:request-ended");
 
-    // Clean up
     yield* Fiber.interrupt(fiber);
   }),
 );
