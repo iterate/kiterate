@@ -26,8 +26,8 @@ export interface SimpleStream {
   /** Read historical events on this path, optionally within a range */
   readonly read: (options?: { from?: Offset; to?: Offset }) => Stream.Stream<Event>;
 
-  /** Append an event to this path */
-  readonly append: (event: EventInput) => Effect.Effect<void>;
+  /** Append an event to this path, returns the assigned offset */
+  readonly append: (event: EventInput) => Effect.Effect<Offset>;
 }
 
 // -------------------------------------------------------------------------------------
@@ -85,9 +85,15 @@ export const toLayer = <R>(
             .pipe(Stream.catchAllCause(() => Stream.empty)),
 
         append: (event) =>
-          streamManager
-            .append({ path, event })
-            .pipe(Effect.catchAllCause((cause) => Effect.logError("append failed", cause))),
+          streamManager.append({ path, event }).pipe(
+            Effect.map((e) => e.offset),
+            Effect.catchAllCause((cause) =>
+              Effect.gen(function* () {
+                yield* Effect.logError("append failed", cause);
+                return Offset.make("-1"); // fallback offset on error
+              }),
+            ),
+          ),
       });
 
       const startConsumer = (path: StreamPath) =>

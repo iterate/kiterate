@@ -43,6 +43,8 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
 
       // Also publish to global PubSub for "all paths" subscribers
       yield* PubSub.publish(globalPubSub, storedEvent);
+
+      return storedEvent;
     });
 
     const subscribe = ({

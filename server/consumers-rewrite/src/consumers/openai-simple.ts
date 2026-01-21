@@ -8,7 +8,7 @@
  * Maintains conversation history and sends it with each request.
  */
 import { LanguageModel, Prompt, Response } from "@effect/ai";
-import { Effect, Exit, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset } from "../domain.js";
 import { AiModelType } from "../services/ai-client/index.js";
@@ -117,6 +117,9 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
         `hydrated, lastOffset=${state.lastOffset}, enabled=${state.enabled}, history=${state.history.length} messages`,
       );
 
+      // Ongoing LLM request fiber
+      let currentFiber: Fiber.RuntimeFiber<void, never> | null = null;
+
       // Phase 2: Subscribe to live events
       yield* stream.subscribe({ from: state.lastOffset }).pipe(
         Stream.runForEach((event) =>
@@ -125,25 +128,37 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
 
             if (!state.enabled) return;
             if (!state.shouldSendLlmRequest) return;
-            // So say if there is an ongoing LLM request, cancel it.
+
+            // Cancel ongoing LLM request if any
+            if (currentFiber) {
+              const interruptedRequestOffset = state.llmRequestStartedAt;
+              yield* Fiber.interrupt(currentFiber);
+              currentFiber = null;
+              yield* stream.append(
+                EventInput.make({
+                  type: EventType.make("iterate:openai:request-interrupted"),
+                  payload: { requestOffset: Option.getOrNull(interruptedRequestOffset) },
+                }),
+              );
+            }
 
             yield* Effect.log(`triggering generation, history=${state.history.length} messages`);
 
-            // 1. Emit request-started
-            yield* stream.append(
+            // 1. Emit request-started and capture the requestOffset
+            const requestOffset = yield* stream.append(
               EventInput.make({
                 type: EventType.make("iterate:openai:request-started"),
                 payload: {},
               }),
             );
 
-            // 2. Stream response with lifecycle events on exit
-            yield* lm.streamText({ prompt: state.history }).pipe(
+            // 2. Fork the LLM stream with lifecycle events on exit
+            currentFiber = yield* lm.streamText({ prompt: state.history }).pipe(
               Stream.runForEach((part) =>
                 stream.append(
                   EventInput.make({
                     type: EventType.make("iterate:openai:response:sse"),
-                    payload: { part },
+                    payload: { part, requestOffset },
                   }),
                 ),
               ),
@@ -153,7 +168,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
                     stream.append(
                       EventInput.make({
                         type: EventType.make("iterate:openai:request-ended"),
-                        payload: {},
+                        payload: { requestOffset },
                       }),
                     ),
                   onFailure: (cause) =>
@@ -162,13 +177,18 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
                       yield* stream.append(
                         EventInput.make({
                           type: EventType.make("iterate:openai:request-cancelled"),
-                          payload: { error: "generation_failed" },
+                          payload: {
+                            requestOffset,
+                            reason: Cause.isInterruptedOnly(cause) ? "interrupted" : "error",
+                            message: Cause.pretty(cause),
+                          },
                         }),
                       );
                     }),
                 }),
               ),
               Effect.catchAllCause(() => Effect.void),
+              Effect.fork,
             );
           }),
         ),

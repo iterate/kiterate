@@ -214,12 +214,6 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
 
   // Sync AI model selector with configured model from stream history
   useEffect(() => {
-    console.log(
-      "[agent-chat] configuredModel changed:",
-      configuredModel,
-      "current aiModel:",
-      aiModel,
-    );
     if (configuredModel) {
       setAiModel(configuredModel);
     }

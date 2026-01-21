@@ -16,7 +16,7 @@ export class StreamManager extends Context.Tag("@app/StreamManager")<
     readonly append: (input: {
       path: StreamPath;
       event: EventInput;
-    }) => Effect.Effect<void, StreamStorageError>;
+    }) => Effect.Effect<Event, StreamStorageError>;
 
     /**
      * Subscribe to events on streams.

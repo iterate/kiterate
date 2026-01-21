@@ -56,11 +56,11 @@ const make = Effect.gen(function* () {
   const append = (input: { path: StreamPath; event: EventInput }) =>
     Effect.gen(function* () {
       yield* Effect.log(`AgentManager.append: type=${input.event.type}`);
-      yield* inner.append(input);
+      const storedEvent = yield* inner.append(input);
 
       if (applyConfig(input.path, input.event)) {
         yield* Effect.log(`Switched AI model`);
-        return;
+        return storedEvent;
       }
 
       const promptInput = PromptInput.fromEventInput(input.event);
@@ -71,6 +71,8 @@ const make = Effect.gen(function* () {
           .prompt(model, input.path, promptInput.value)
           .pipe(Stream.runForEach((event) => inner.append({ path: input.path, event })));
       }
+
+      return storedEvent;
     });
 
   return StreamManager.of({ subscribe, append });
@@ -91,7 +93,7 @@ const makeTest = Effect.gen(function* () {
   const append = (input: { path: StreamPath; event: EventInput }) =>
     Effect.gen(function* () {
       yield* Effect.log(`AgentManager(test).append: type=${input.event.type} [LLM disabled]`);
-      yield* inner.append(input);
+      return yield* inner.append(input);
     });
 
   return StreamManager.of({ subscribe, append });
