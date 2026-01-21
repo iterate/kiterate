@@ -97,6 +97,9 @@ export interface WrapperState {
   /** Grok voice state */
   grokStreamingTranscript: string;
   grokAudioChunks: string[];
+  /** Pending user audio (waiting for transcript from Grok) */
+  pendingUserAudio?: string | undefined;
+  pendingUserAudioTimestamp?: number | undefined;
   /** Currently configured AI model (from config events) */
   configuredModel?: AiModelType | undefined;
 }
@@ -298,6 +301,30 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
 
   // Handle Grok voice events
   if (type === GROK_EVENT) {
+    const payload = e.payload as { type?: string; transcript?: string } | undefined;
+
+    // Handle user audio transcription - merge with pending audio
+    if (payload?.type === "conversation.item.input_audio_transcription.completed") {
+      const transcript = payload.transcript;
+      if (typeof transcript === "string" && transcript.trim()) {
+        const msgItem: MessageFeedItem = {
+          kind: "message",
+          role: "user",
+          content: [{ type: "text", text: transcript.trim() }],
+          timestamp: state.pendingUserAudioTimestamp ?? t,
+          ...(state.pendingUserAudio ? { audioData: state.pendingUserAudio } : {}),
+        };
+        return {
+          ...state,
+          feed: [...state.feed, evtItem, msgItem],
+          rawEvents,
+          pendingUserAudio: undefined,
+          pendingUserAudioTimestamp: undefined,
+        };
+      }
+      return { ...state, feed: [...state.feed, evtItem], rawEvents };
+    }
+
     const innerState = innerGrokReducer(
       {
         feed: state.feed as GrokFeedItem[],
@@ -341,18 +368,17 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
     return { ...state, feed: [...state.feed, evtItem], rawEvents };
   }
 
-  // User audio action → create message with audio data for playback
+  // User audio action → store pending audio (message created when transcript arrives)
   if (type === USER_AUDIO) {
     const audio = (e.payload as { audio?: string })?.audio;
     if (audio) {
-      const msgItem: MessageFeedItem = {
-        kind: "message",
-        role: "user",
-        content: [{ type: "text", text: "" }], // Transcript will come from Grok
-        timestamp: t,
-        audioData: audio,
+      return {
+        ...state,
+        feed: [...state.feed, evtItem],
+        rawEvents,
+        pendingUserAudio: audio,
+        pendingUserAudioTimestamp: t,
       };
-      return { ...state, feed: [...state.feed, evtItem, msgItem], rawEvents };
     }
     return { ...state, feed: [...state.feed, evtItem], rawEvents };
   }
