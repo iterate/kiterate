@@ -347,7 +347,6 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
   // Config event - track the configured AI model
   if (type === CONFIG_EVENT) {
     const model = (e.payload as { model?: string })?.model;
-    console.log("[reducer] Config event received, model:", model, "payload:", e.payload);
     if (model === "openai" || model === "grok") {
       return { ...state, feed: [...state.feed, evtItem], rawEvents, configuredModel: model };
     }
