@@ -3,7 +3,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
-import { OpenAiConsumer } from "./consumers/openai.js";
+import { OpenAiSimpleConsumerLayer } from "./consumers/openai-simple.js";
 import { ServerLive } from "./server.js";
 import { AiClient } from "./services/ai-client/index.js";
 import { GrokVoiceClient, GrokVoiceConfig } from "./services/grok-voice/index.js";
@@ -34,7 +34,7 @@ const AiClientLive = AiClient.layer.pipe(
 );
 
 // Consumers (background processes that run with the server)
-const ConsumersLive = Layer.mergeAll(OpenAiConsumer);
+const ConsumersLive = Layer.mergeAll(OpenAiSimpleConsumerLayer);
 
 // StreamManager with consumers on top
 const StreamManagerLive = ConsumersLive.pipe(

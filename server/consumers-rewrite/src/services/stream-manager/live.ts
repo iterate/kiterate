@@ -1,7 +1,7 @@
 /**
  * Live implementation of StreamManager
  */
-import { Effect, Layer, PubSub, Ref, Stream } from "effect";
+import { Effect, Layer, PubSub, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
@@ -98,19 +98,25 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
                     )
                   : Stream.empty;
 
-              // Track last seen offset for deduplication
-              const lastOffsetRef = yield* Ref.make<Offset>(afterOffset);
+              // Track last seen offset PER PATH for deduplication (offsets are path-local)
+              const lastOffsetByPath = new Map<StreamPath, Offset>();
+              existingPaths.forEach((p) => lastOffsetByPath.set(p, afterOffset));
 
               const trackedHistorical = historicalStream.pipe(
-                Stream.tap((event) => Ref.set(lastOffsetRef, event.offset)),
+                Stream.tap((event) =>
+                  Effect.sync(() => lastOffsetByPath.set(event.path, event.offset)),
+                ),
               );
 
               const dedupedLive = liveStream.pipe(
-                Stream.filterEffect((event) =>
-                  Ref.get(lastOffsetRef).pipe(
-                    Effect.map((lastOffset) => event.offset > lastOffset),
-                  ),
-                ),
+                Stream.filter((event) => {
+                  const lastOffset = lastOffsetByPath.get(event.path) ?? Offset.make("-1");
+                  if (event.offset > lastOffset) {
+                    lastOffsetByPath.set(event.path, event.offset);
+                    return true;
+                  }
+                  return false;
+                }),
               );
 
               return Stream.concat(trackedHistorical, dedupedLive);
