@@ -2,7 +2,7 @@ import { Response } from "@effect/ai";
 import { it, expect } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { StreamPath } from "../domain.js";
+import { Event, StreamPath } from "../domain.js";
 import {
   ConfigSetEvent,
   UserMessageEvent,
@@ -15,7 +15,21 @@ import {
 import { TestLanguageModel, makeTestSimpleStream } from "../testing/index.js";
 import { OpenAiSimpleConsumer } from "./openai-simple.js";
 
-type StreamPart = Response.StreamPart<{}>;
+// -------------------------------------------------------------------------------------
+// Test Helpers
+// -------------------------------------------------------------------------------------
+
+/** Find all events matching a schema */
+const findEvents = <P>(
+  events: readonly Event[],
+  schema: { is: (e: Event) => e is Event & { payload: P } },
+) => events.filter(schema.is);
+
+/** Find first event matching a schema */
+const findEvent = <P>(
+  events: readonly Event[],
+  schema: { is: (e: Event) => e is Event & { payload: P } },
+) => events.find(schema.is);
 
 // -------------------------------------------------------------------------------------
 // Tests
@@ -42,26 +56,36 @@ it.scoped("triggers LLM on user message when enabled", () =>
     yield* lm.waitForCall();
 
     // Emit a response and complete
-    yield* lm.emit({
-      type: "text-delta",
-      delta: "Hi!",
-      id: "msg1",
-      metadata: {},
-    } as StreamPart);
+    yield* lm.emit(Response.textDeltaPart({ id: "msg1", delta: "Hi!" }));
     yield* lm.complete();
 
     // Wait for request-ended event
-    yield* stream.waitForEventType(RequestEndedEvent.type);
+    yield* stream.waitForEvent(RequestEndedEvent);
 
-    // Verify events
     const events = yield* stream.getEvents();
-    const eventTypes = events.map((e) => e.type);
 
-    expect(eventTypes).toContain(ConfigSetEvent.typeString);
-    expect(eventTypes).toContain(UserMessageEvent.typeString);
-    expect(eventTypes).toContain(RequestStartedEvent.typeString);
-    expect(eventTypes).toContain(ResponseSseEvent.typeString);
-    expect(eventTypes).toContain(RequestEndedEvent.typeString);
+    // Verify event sequence
+    const eventTypes = events.map((e) => e.type);
+    expect(eventTypes).toEqual([
+      ConfigSetEvent.typeString,
+      UserMessageEvent.typeString,
+      RequestStartedEvent.typeString,
+      ResponseSseEvent.typeString,
+      RequestEndedEvent.typeString,
+    ]);
+
+    // Verify requestOffset consistency - SSE and ended events reference the started event
+    const requestStarted = findEvent(events, RequestStartedEvent);
+    const responseSse = findEvent(events, ResponseSseEvent);
+    const requestEnded = findEvent(events, RequestEndedEvent);
+
+    expect(requestStarted).toBeDefined();
+    expect(responseSse).toBeDefined();
+    expect(requestEnded).toBeDefined();
+
+    const requestOffset = requestStarted!.offset;
+    expect(responseSse!.payload.requestOffset).toBe(requestOffset);
+    expect(requestEnded!.payload.requestOffset).toBe(requestOffset);
   }).pipe(Effect.provide(TestLanguageModel.layer)),
 );
 
@@ -84,18 +108,11 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
     yield* lm.waitForCall();
 
     // Emit a couple of deltas but DON'T complete
-    yield* lm.emit({
-      type: "text-delta",
-      delta: "Starting to ",
-      id: "msg1",
-      metadata: {},
-    } as StreamPart);
-    yield* lm.emit({
-      type: "text-delta",
-      delta: "respond...",
-      id: "msg1",
-      metadata: {},
-    } as StreamPart);
+    yield* lm.emit(Response.textDeltaPart({ id: "msg1", delta: "Starting to " }));
+    yield* lm.emit(Response.textDeltaPart({ id: "msg1", delta: "respond..." }));
+
+    // Wait for the 2 SSE events to be processed before interrupting
+    yield* stream.waitForEventCount(ResponseSseEvent, 2);
 
     // Send second user message while first is still streaming
     yield* stream.appendEvent(
@@ -106,35 +123,46 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
     yield* lm.waitForCall();
 
     // Complete the second request
-    yield* lm.emit({
-      type: "text-delta",
-      delta: "Response to second!",
-      id: "msg2",
-      metadata: {},
-    } as StreamPart);
+    yield* lm.emit(Response.textDeltaPart({ id: "msg2", delta: "Response to second!" }));
     yield* lm.complete();
 
     // Wait for the second request to end
-    yield* stream.waitForEventType(RequestEndedEvent.type);
+    yield* stream.waitForEvent(RequestEndedEvent);
 
-    // Verify events
     const events = yield* stream.getEvents();
-    const eventTypes = events.map((e) => e.type);
 
-    // Should have two request-started events
-    const requestStartedCount = eventTypes.filter(
-      (t) => t === RequestStartedEvent.typeString,
-    ).length;
-    expect(requestStartedCount).toBe(2);
+    // Find key events
+    const requestsStarted = findEvents(events, RequestStartedEvent);
+    const responsesSse = findEvents(events, ResponseSseEvent);
+    const requestInterrupted = findEvent(events, RequestInterruptedEvent);
+    const requestCancelled = findEvent(events, RequestCancelledEvent);
+    const requestEnded = findEvent(events, RequestEndedEvent);
 
-    // Should have an interrupted event for the first request
-    expect(eventTypes).toContain(RequestInterruptedEvent.typeString);
+    // Should have exactly two request-started events
+    expect(requestsStarted).toHaveLength(2);
+    const [firstRequest, secondRequest] = requestsStarted;
 
-    // Should have a cancelled event (from the fiber interruption)
-    expect(eventTypes).toContain(RequestCancelledEvent.typeString);
+    // Should have three SSE events (2 from first request, 1 from second)
+    expect(responsesSse).toHaveLength(3);
 
-    // Should have exactly one request-ended (for the second request)
-    const requestEndedCount = eventTypes.filter((t) => t === RequestEndedEvent.typeString).length;
-    expect(requestEndedCount).toBe(1);
+    // First two SSE events should reference the first request's offset
+    expect(responsesSse[0].payload.requestOffset).toBe(firstRequest.offset);
+    expect(responsesSse[1].payload.requestOffset).toBe(firstRequest.offset);
+
+    // Third SSE event should reference the second request's offset
+    expect(responsesSse[2].payload.requestOffset).toBe(secondRequest.offset);
+
+    // Interrupted event should reference the first request's offset
+    expect(requestInterrupted).toBeDefined();
+    expect(requestInterrupted!.payload.requestOffset).toBe(firstRequest.offset);
+
+    // Cancelled event should reference the first request's offset
+    expect(requestCancelled).toBeDefined();
+    expect(requestCancelled!.payload.requestOffset).toBe(firstRequest.offset);
+    expect(requestCancelled!.payload.reason).toBe("interrupted");
+
+    // Ended event should reference the second request's offset
+    expect(requestEnded).toBeDefined();
+    expect(requestEnded!.payload.requestOffset).toBe(secondRequest.offset);
   }).pipe(Effect.provide(TestLanguageModel.layer)),
 );
