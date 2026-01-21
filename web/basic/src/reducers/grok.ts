@@ -198,23 +198,8 @@ export function grokReducer(state: GrokState, event: GrokEvent): GrokState {
       };
     }
 
-    // User audio transcription completed - add user message with recognized speech
-    case "conversation.item.input_audio_transcription.completed": {
-      const transcript = event.payload.transcript;
-      if (typeof transcript === "string" && transcript.trim()) {
-        const userMessage: MessageFeedItem = {
-          kind: "message",
-          role: "user",
-          content: [{ type: "text", text: transcript.trim() }],
-          timestamp: now,
-        };
-        return {
-          ...state,
-          feed: [...state.feed, userMessage],
-        };
-      }
-      return state;
-    }
+    // Note: conversation.item.input_audio_transcription.completed is handled
+    // in wrapper reducer to merge with pending user audio
 
     default:
       return state;
