@@ -22,16 +22,18 @@ type State = {
   enabled: boolean;
   lastOffset: Offset;
   history: Array<Prompt.MessageEncoded>;
-  shouldSendLlmRequest: boolean;
-  llmRequestStartedAt: Option.Option<Offset>;
+  /** Offset of most recent user message requiring LLM response */
+  llmRequestRequiredFrom: Option.Option<Offset>;
+  /** Offset of most recent request-started (never cleared, used for trigger comparison) */
+  llmLastRespondedAt: Option.Option<Offset>;
 };
 
 const initialState: State = {
   enabled: false,
   lastOffset: Offset.make("-1"),
   history: [],
-  shouldSendLlmRequest: false,
-  llmRequestStartedAt: Option.none(),
+  llmRequestRequiredFrom: Option.none(),
+  llmLastRespondedAt: Option.none(),
 };
 
 const decodeTextDelta = Schema.decodeUnknownOption(Response.TextDeltaPart);
@@ -49,28 +51,24 @@ const reduce = (state: State, event: Event): State => {
     return { ...base, enabled: modelChange.value === "openai" };
   }
 
-  // User message - add to history and mark for LLM request
+  // User message - add to history and mark offset as pending
   if (event.type === "iterate:agent:action:send-user-message:called") {
     const content = event.payload["content"];
     if (typeof content === "string") {
       return {
         ...base,
         history: [...state.history, { role: "user", content }],
-        shouldSendLlmRequest: true,
+        llmRequestRequiredFrom: Option.some(event.offset),
       };
     }
   }
 
-  // Request lifecycle events
+  // Request started - track that we've responded to the current user message
   if (event.type === "iterate:openai:request-started") {
-    return { ...base, shouldSendLlmRequest: false, llmRequestStartedAt: Option.some(event.offset) };
+    return { ...base, llmLastRespondedAt: Option.some(event.offset) };
   }
-  if (event.type === "iterate:openai:request-ended") {
-    return { ...base, llmRequestStartedAt: Option.none() };
-  }
-  if (event.type === "iterate:openai:request-cancelled") {
-    return { ...base, llmRequestStartedAt: Option.none() };
-  }
+  // request-ended and request-cancelled don't affect state
+  // (in-flight tracking is handled by currentFiber locally)
 
   // Assistant response - parse our own emitted SSE events
   if (event.type === "iterate:openai:response:sse") {
@@ -114,7 +112,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
       let state = yield* stream.read().pipe(Stream.runFold(initialState, reduce));
 
       yield* Effect.log(
-        `hydrated, lastOffset=${state.lastOffset}, enabled=${state.enabled}, history=${state.history.length} messages`,
+        `hydrated, lastOffset=${state.lastOffset}, enabled=${state.enabled}, history=${state.history.length} messages, pending=${Option.getOrNull(state.llmRequestRequiredFrom)}`,
       );
 
       // Ongoing LLM request fiber
@@ -127,13 +125,35 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
             state = reduce(state, event);
 
             if (!state.enabled) return;
-            if (!state.shouldSendLlmRequest) return;
 
-            // Cancel ongoing LLM request if any
+            // Trigger if there's a user message newer than our last request-started
+            const shouldTriggerLlmResponse = Option.match(state.llmRequestRequiredFrom, {
+              onNone: () => false,
+              onSome: (requiredFrom) =>
+                Option.match(state.llmLastRespondedAt, {
+                  onNone: () => true,
+                  onSome: (startedAt) => Offset.gt(requiredFrom, startedAt),
+                }),
+            });
+            if (!shouldTriggerLlmResponse) return;
+
+            yield* Effect.log(`triggering generation, history=${state.history.length} messages`);
+
+            // 1. Emit request-started FIRST (before interrupt) so it gets a lower offset
+            //    and arrives before any cancellation events from the old request
+            const requestOffset = yield* stream.append(
+              EventInput.make({
+                type: EventType.make("iterate:openai:request-started"),
+                payload: {},
+              }),
+            );
+
+            // 2. Cancel ongoing LLM request if any
             if (currentFiber) {
-              const interruptedRequestOffset = state.llmRequestStartedAt;
-              yield* Fiber.interrupt(currentFiber);
+              const interruptedRequestOffset = state.llmLastRespondedAt;
+              const fiber = currentFiber;
               currentFiber = null;
+              yield* Fiber.interrupt(fiber);
               yield* stream.append(
                 EventInput.make({
                   type: EventType.make("iterate:openai:request-interrupted"),
@@ -142,17 +162,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
               );
             }
 
-            yield* Effect.log(`triggering generation, history=${state.history.length} messages`);
-
-            // 1. Emit request-started and capture the requestOffset
-            const requestOffset = yield* stream.append(
-              EventInput.make({
-                type: EventType.make("iterate:openai:request-started"),
-                payload: {},
-              }),
-            );
-
-            // 2. Fork the LLM stream with lifecycle events on exit
+            // 3. Fork the LLM stream with lifecycle events on exit
             currentFiber = yield* lm.streamText({ prompt: state.history }).pipe(
               Stream.runForEach((part) =>
                 stream.append(
@@ -162,6 +172,7 @@ const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
                   }),
                 ),
               ),
+              Effect.ensuring(Effect.sync(() => (currentFiber = null))),
               Effect.onExit((exit) =>
                 Exit.match(exit, {
                   onSuccess: () =>

@@ -10,8 +10,23 @@ import { Schema } from "effect";
 export const StreamPath = Schema.String.pipe(Schema.brand("StreamPath"));
 export type StreamPath = typeof StreamPath.Type;
 
-export const Offset = Schema.String.pipe(Schema.brand("Offset"));
-export type Offset = typeof Offset.Type;
+const Offset_ = Schema.String.pipe(Schema.brand("Offset"));
+type Offset_ = typeof Offset_.Type;
+
+/** Offset comparison utilities (zero-padded strings compare correctly) */
+const OffsetExtensions = {
+  /** a > b (strictly greater) */
+  gt: (a: Offset_, b: Offset_): boolean => a > b,
+  /** a >= b */
+  gte: (a: Offset_, b: Offset_): boolean => a >= b,
+  /** a < b */
+  lt: (a: Offset_, b: Offset_): boolean => a < b,
+  /** a <= b */
+  lte: (a: Offset_, b: Offset_): boolean => a <= b,
+};
+
+export const Offset = Object.assign(Offset_, OffsetExtensions);
+export type Offset = Offset_;
 
 export const EventType = Schema.String.pipe(Schema.brand("EventType"));
 export type EventType = typeof EventType.Type;
