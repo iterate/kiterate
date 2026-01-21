@@ -4,118 +4,113 @@ Effect-native event streaming infrastructure with AI integration.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              HTTP Layer                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  GET /agents/:path?offset=X&live=true  →  SSE stream                │    │
-│  │  POST /agents/:path                    →  append event              │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           StreamManager                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  agentLayer (decorator)                                             │    │
-│  │  ├─ Intercepts append() for config/prompt events                    │    │
-│  │  ├─ Triggers AI generation on user messages                         │    │
-│  │  └─ Streams AI responses back as events                             │    │
-│  │         │                                                           │    │
-│  │         ▼                                                           │    │
-│  │  liveLayer (core implementation)                                    │    │
-│  │  └─ Manages per-path EventStream instances                          │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
-                        │                           │
-                        ▼                           ▼
-┌──────────────────────────────────┐  ┌────────────────────────────────────────┐
-│         StreamStorage            │  │              AiClient                   │
-│  ┌────────────────────────────┐  │  │  ┌────────────────────────────────────┐│
-│  │  fileSystemLayer           │  │  │  │  OpenAI (LanguageModel)            ││
-│  │  └─ .data/streams/*.yaml   │  │  │  │  └─ gpt-4o via @effect/ai          ││
-│  │  └─ Offset tracking        │  │  │  ├────────────────────────────────────┤│
-│  ├────────────────────────────┤  │  │  │  Grok (GrokVoiceClient)            ││
-│  │  inMemoryLayer (testing)   │  │  │  │  └─ WebSocket to api.x.ai          ││
-│  └────────────────────────────┘  │  │  │  └─ Audio + text support           ││
-└──────────────────────────────────┘  │  └────────────────────────────────────┘│
-                                      └────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph HTTP["HTTP Layer"]
+        GET["GET /agents/:path?offset&live → SSE"]
+        POST["POST /agents/:path → append"]
+    end
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            EventStream                                       │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  append() ──┬──▶ Storage.append() (persist)                         │    │
-│  │             └──▶ PubSub.publish() (broadcast)                       │    │
-│  │                                                                     │    │
-│  │  subscribe() ──▶ Storage.read() (history)                           │    │
-│  │              └──▶ PubSub.stream() (live, deduplicated)              │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────────────────┘
+    subgraph SM["StreamManager"]
+        AL["agentLayer (decorator)"]
+        LL["liveLayer (core)"]
+        AL -->|wraps| LL
+    end
+
+    subgraph Storage["StreamStorage"]
+        FS["fileSystemLayer<br/>.data/streams/*.yaml"]
+        IM["inMemoryLayer (testing)"]
+    end
+
+    subgraph AI["AiClient"]
+        OAI["OpenAI<br/>gpt-4o via @effect/ai"]
+        GROK["Grok<br/>WebSocket to api.x.ai"]
+    end
+
+    subgraph ES["EventStream"]
+        APP["append() → Storage + PubSub"]
+        SUB["subscribe() → History + Live"]
+    end
+
+    HTTP --> SM
+    LL --> Storage
+    LL --> AI
+    LL --> ES
 ```
 
-## Layer Composition (main.ts)
+## Layer Composition
 
-```
-ServerLive(port)
-└─ AppLive
-   └─ StreamManager.agentLayer
-      └─ StreamManager.liveLayer
-         ├─ StreamStorage.fileSystemLayer(".data/streams")
-         │  └─ NodeContext.layer
-         └─ AiClient.layer
-            ├─ LanguageModel (OpenAI)
-            │  └─ OpenAiClient.layer
-            └─ GrokVoiceClient.Default
-               └─ GrokVoiceConfig.defaultLayer
-```
-
-## Data Flow
-
-### Append (POST)
-
-```
-Client POST → appendHandler → agentLayer.append()
-                                    │
-                    ┌───────────────┼───────────────┐
-                    ▼               ▼               ▼
-              config event?    prompt event?    other event
-                    │               │               │
-                    ▼               ▼               ▼
-             update model    trigger AI gen    inner.append()
-                    │               │
-                    │               ▼
-                    │         AiClient.prompt()
-                    │               │
-                    │               ▼
-                    │         Stream response events
-                    │               │
-                    └───────────────┼───────────────┘
-                                    ▼
-                            inner.append() for each
-                                    │
-                                    ▼
-                            Storage + PubSub
+```mermaid
+graph TB
+    SL["ServerLive(port)"] --> AL["AppLive"]
+    AL --> AGL["StreamManager.agentLayer"]
+    AGL --> LL["StreamManager.liveLayer"]
+    LL --> SSL["StreamStorage.fileSystemLayer"]
+    SSL --> NC["NodeContext.layer"]
+    LL --> AIC["AiClient.layer"]
+    AIC --> LM["LanguageModel (OpenAI)"]
+    LM --> OAC["OpenAiClient.layer"]
+    AIC --> GVC["GrokVoiceClient.Default"]
+    GVC --> GVCfg["GrokVoiceConfig.defaultLayer"]
 ```
 
-### Subscribe (GET)
+## Data Flow: Append (POST)
 
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant H as HTTP Handler
+    participant A as agentLayer
+    participant I as inner (liveLayer)
+    participant AI as AiClient
+    participant S as Storage + PubSub
+
+    C->>H: POST /agents/:path
+    H->>A: append(event)
+
+    alt Config Event
+        A->>A: Update model selection
+        A->>I: append(event)
+    else Prompt Event
+        A->>I: append(event)
+        A->>AI: prompt(model, input)
+        loop Stream Response
+            AI-->>A: EventInput
+            A->>I: append(response)
+        end
+    else Other Event
+        A->>I: append(event)
+    end
+
+    I->>S: Storage.append() + PubSub.publish()
 ```
-Client GET → subscribeHandler → StreamManager.subscribe()
-                                        │
-                    ┌───────────────────┴───────────────────┐
-                    ▼                                       ▼
-              Historical                               Live (if enabled)
-              Storage.read(after: offset)              PubSub.subscribe()
-                    │                                       │
-                    └───────────────────┬───────────────────┘
-                                        ▼
-                               Deduplicate (via Ref)
-                                        │
-                                        ▼
-                               Stream.map(Sse.data)
-                                        │
-                                        ▼
-                               SSE Response
+
+## Data Flow: Subscribe (GET)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant H as HTTP Handler
+    participant SM as StreamManager
+    participant ES as EventStream
+    participant S as Storage
+    participant PS as PubSub
+
+    C->>H: GET /agents/:path?offset&live
+    H->>SM: subscribe(path, offset, live)
+    SM->>ES: subscribe()
+
+    par Historical Events
+        ES->>S: read(after: offset)
+        S-->>ES: Stream[Event]
+    and Live Events (if enabled)
+        ES->>PS: subscribe()
+        PS-->>ES: Stream[Event]
+    end
+
+    ES->>ES: Deduplicate via Ref
+    ES-->>H: Stream[Event]
+    H-->>C: SSE Response
 ```
 
 ## Domain Types
