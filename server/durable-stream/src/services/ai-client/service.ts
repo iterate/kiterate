@@ -32,7 +32,13 @@ export const PromptInput = Object.assign(Schema.Union(TextPrompt, AudioPrompt), 
         return Option.some(new TextPrompt({ content }));
       }
     }
-    // TODO: handle audio events
+    if (event.type === "iterate:agent:action:send-user-audio:called") {
+      const audio = event.payload["audio"];
+      if (typeof audio === "string") {
+        const data = new Uint8Array(Buffer.from(audio, "base64"));
+        return Option.some(new AudioPrompt({ data }));
+      }
+    }
     return Option.none();
   },
 });
@@ -64,7 +70,17 @@ const makeOpenAiClient = Effect.gen(function* () {
   return {
     prompt: (input: PromptInput): Stream.Stream<EventInput, never> => {
       if (input._tag === "AudioPrompt") {
-        return Stream.empty;
+        return Stream.make(
+          EventInput.make({
+            type: EventType.make("iterate:ai:error"),
+            payload: {
+              error: "unsupported_input",
+              message: "OpenAI does not support audio input. Switch to Grok for voice.",
+              model: "openai",
+              inputType: "audio",
+            },
+          }),
+        );
       }
 
       return languageModel.streamText({ prompt: input.content }).pipe(
@@ -75,7 +91,18 @@ const makeOpenAiClient = Effect.gen(function* () {
           }),
         ),
         Stream.catchAll((error) =>
-          Stream.fromEffect(Effect.logError("LLM generation failed", error)).pipe(Stream.drain),
+          Stream.fromEffect(Effect.logError("LLM generation failed", error)).pipe(
+            Stream.as(
+              EventInput.make({
+                type: EventType.make("iterate:ai:error"),
+                payload: {
+                  error: "generation_failed",
+                  message: `OpenAI generation failed: ${error instanceof Error ? error.message : String(error)}`,
+                  model: "openai",
+                },
+              }),
+            ),
+          ),
         ),
       );
     },
@@ -131,7 +158,19 @@ const makeGrokClient = Effect.gen(function* () {
           );
         }).pipe(
           Effect.catchAll((error) =>
-            Effect.as(Effect.logError("Grok connection failed", error), Stream.empty),
+            Effect.gen(function* () {
+              yield* Effect.logError("Grok connection failed", error);
+              return Stream.make(
+                EventInput.make({
+                  type: EventType.make("iterate:ai:error"),
+                  payload: {
+                    error: "connection_failed",
+                    message: `Grok connection failed: ${error instanceof Error ? error.message : String(error)}`,
+                    model: "grok",
+                  },
+                }),
+              );
+            }),
           ),
         ),
       ),

@@ -130,12 +130,13 @@ Storage.read()     PubSub.subscribe()
 
 ## Key Event Types
 
-| Event Type                                      | Trigger                                               |
-| ----------------------------------------------- | ----------------------------------------------------- |
-| `iterate:agent:config:set`                      | Switch AI model (`payload.model: "openai" \| "grok"`) |
-| `iterate:agent:action:send-user-message:called` | User message, triggers AI                             |
-| `iterate:openai:response:sse`                   | OpenAI streaming response chunk                       |
-| `iterate:grok:response:sse`                     | Grok streaming response event                         |
+| Event Type                                      | Trigger                                                    |
+| ----------------------------------------------- | ---------------------------------------------------------- |
+| `iterate:agent:config:set`                      | Switch AI model (`payload.model: "openai" \| "grok"`)      |
+| `iterate:agent:action:send-user-message:called` | User message, triggers AI                                  |
+| `iterate:openai:response:sse`                   | OpenAI streaming response chunk                            |
+| `iterate:grok:response:sse`                     | Grok streaming response event                              |
+| `iterate:ai:error`                              | AI error (unsupported input, connection/generation failed) |
 
 ## Storage Format
 

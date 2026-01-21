@@ -19,6 +19,14 @@ export const DEFAULT_VOICE: VoiceName = "ara";
 export const DEFAULT_INSTRUCTIONS =
   "You are a helpful voice assistant. Keep your responses conversational and concise since they will be spoken aloud.";
 
+export class GrokVoiceConnectionError extends Schema.TaggedError<GrokVoiceConnectionError>()(
+  "GrokVoiceConnectionError",
+  {
+    message: Schema.String,
+    error: Schema.Defect,
+  },
+) {}
+
 export class GrokVoiceConfig extends Context.Tag("@grok/GrokVoiceConfig")<
   GrokVoiceConfig,
   {
@@ -63,7 +71,7 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
   effect: Effect.gen(function* () {
     const config = yield* GrokVoiceConfig;
 
-    const connect = (): Effect.Effect<GrokVoiceConnection, Error> =>
+    const connect = (): Effect.Effect<GrokVoiceConnection, GrokVoiceConnectionError> =>
       Effect.gen(function* () {
         const apiUrl = config.apiUrl ?? DEFAULT_API_URL;
         const voice = config.voice ?? DEFAULT_VOICE;
@@ -116,7 +124,7 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
         };
 
         // Connect WebSocket
-        yield* Effect.async<void, Error>((resume) => {
+        yield* Effect.async<void, GrokVoiceConnectionError>((resume) => {
           const socket = new WebSocket(apiUrl, {
             headers: {
               Authorization: `Bearer ${config.apiKey}`,
@@ -149,7 +157,12 @@ export class GrokVoiceClient extends Effect.Service<GrokVoiceClient>()("@grok/Gr
           });
 
           socket.on("error", (error) =>
-            resume(Effect.fail(error instanceof Error ? error : new Error(String(error)))),
+            resume(
+              GrokVoiceConnectionError.make({
+                message: error instanceof Error ? error.message : "WebSocket error",
+                error,
+              }),
+            ),
           );
 
           socket.on("close", () => {

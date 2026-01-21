@@ -45,27 +45,47 @@ export function createInitialGrokState(): GrokState {
   };
 }
 
-/** Play audio chunks - call from client when live events complete */
-export function playAudio(audioChunks: string[]): void {
-  if (audioChunks.length === 0) return;
+/** Audio playback control handle */
+export interface AudioPlaybackHandle {
+  /** Stop playback */
+  stop: () => void;
+  /** Duration in seconds */
+  duration: number;
+}
 
-  // Convert base64 chunks to audio buffer
-  const binaryChunks = audioChunks.map((chunk) => {
-    const binary = atob(chunk);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  });
+/**
+ * Get duration of PCM s16le audio data in seconds (48kHz, mono).
+ */
+export function getAudioDuration(audioInput: string | string[]): number {
+  if (!audioInput || (Array.isArray(audioInput) && audioInput.length === 0)) return 0;
+  const base64Data = Array.isArray(audioInput) ? audioInput.join("") : audioInput;
+  if (!base64Data) return 0;
+  // base64 encodes 3 bytes as 4 chars, PCM s16le is 2 bytes per sample at 48kHz
+  const byteLength = (base64Data.length * 3) / 4;
+  const numSamples = byteLength / 2;
+  return numSamples / 48000;
+}
 
-  // Concatenate all chunks
-  const totalLength = binaryChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const audioData = new Uint8Array(totalLength);
-  let offset = 0;
-  for (const chunk of binaryChunks) {
-    audioData.set(chunk, offset);
-    offset += chunk.length;
+/**
+ * Play audio from PCM s16le base64 data (48kHz, mono).
+ * Accepts either an array of base64 chunks or a single base64 string.
+ * Returns a handle to stop playback and get duration, or null if no audio.
+ */
+export function playAudio(
+  audioInput: string | string[],
+  onEnded?: () => void,
+): AudioPlaybackHandle | null {
+  if (!audioInput || (Array.isArray(audioInput) && audioInput.length === 0)) return null;
+
+  // Normalize to single base64 string
+  const base64Data = Array.isArray(audioInput) ? audioInput.join("") : audioInput;
+  if (!base64Data) return null;
+
+  // Decode base64 to bytes
+  const binary = atob(base64Data);
+  const audioData = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    audioData[i] = binary.charCodeAt(i);
   }
 
   // Convert PCM s16le to AudioBuffer and play
@@ -86,7 +106,18 @@ export function playAudio(audioChunks: string[]): void {
   const source = audioContext.createBufferSource();
   source.buffer = audioBuffer;
   source.connect(audioContext.destination);
+  if (onEnded) {
+    source.onended = onEnded;
+  }
   source.start();
+
+  return {
+    stop: () => {
+      source.stop();
+      audioContext.close();
+    },
+    duration: numSamples / sampleRate,
+  };
 }
 
 export function grokReducer(state: GrokState, event: GrokEvent): GrokState {
@@ -147,11 +178,13 @@ export function grokReducer(state: GrokState, event: GrokEvent): GrokState {
       // Add final message to feed if we have transcript content
       let feed = state.feed;
       if (state.streamingTranscript) {
+        // Build message, conditionally including audioData only if we have chunks
         const finalMessage: MessageFeedItem = {
           kind: "message",
           role: "assistant",
           content: [{ type: "text", text: state.streamingTranscript }],
           timestamp: now,
+          ...(state.audioChunks.length > 0 ? { audioData: state.audioChunks.join("") } : {}),
         };
         feed = [...state.feed, finalMessage];
       }

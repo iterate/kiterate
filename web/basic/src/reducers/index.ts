@@ -36,10 +36,12 @@ import { iterateReducer as innerIterateReducer, type FeedItem as IterateFeedItem
 import {
   grokReducer as innerGrokReducer,
   playAudio as grokPlayAudio,
+  getAudioDuration as grokGetAudioDuration,
   type FeedItem as GrokFeedItem,
+  type AudioPlaybackHandle,
 } from "./grok";
 
-export { grokPlayAudio };
+export { grokPlayAudio, grokGetAudioDuration, type AudioPlaybackHandle };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Re-export shared types from backend
@@ -125,6 +127,7 @@ const OPENAI_EVENT = "iterate:openai:response:sse";
 const GROK_EVENT = "iterate:grok:response:sse";
 const CONFIG_EVENT = "iterate:agent:config:set";
 const USER_MSG = "iterate:agent:action:send-user-message:called";
+const USER_AUDIO = "iterate:agent:action:send-user-audio:called";
 const AGENT_ERROR = "iterate:agent:error";
 
 function getTimestamp(e: Record<string, unknown>): number {
@@ -332,6 +335,22 @@ export function wrapperReducer(state: WrapperState, event: unknown): WrapperStat
         role: "user",
         content: [{ type: "text", text: content }],
         timestamp: t,
+      };
+      return { ...state, feed: [...state.feed, evtItem, msgItem], rawEvents };
+    }
+    return { ...state, feed: [...state.feed, evtItem], rawEvents };
+  }
+
+  // User audio action → create message with audio data for playback
+  if (type === USER_AUDIO) {
+    const audio = (e.payload as { audio?: string })?.audio;
+    if (audio) {
+      const msgItem: MessageFeedItem = {
+        kind: "message",
+        role: "user",
+        content: [{ type: "text", text: "" }], // Transcript will come from Grok
+        timestamp: t,
+        audioData: audio,
       };
       return { ...state, feed: [...state.feed, evtItem, msgItem], rawEvents };
     }

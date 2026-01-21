@@ -24,6 +24,8 @@ export interface MessageFeedItem {
   role: "user" | "assistant";
   content: ContentBlock[];
   timestamp: number;
+  /** Base64 audio data for playback (PCM s16le, 48kHz for Grok, or recorded user audio) */
+  audioData?: string;
 }
 
 export interface EventFeedItem {

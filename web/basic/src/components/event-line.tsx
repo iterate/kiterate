@@ -1,4 +1,5 @@
-import { useState, memo } from "react";
+import { useState, memo, useCallback, useRef, useMemo } from "react";
+import { PlayIcon, PauseIcon } from "lucide-react";
 import { HarnessErrorAlert } from "./harness-error-alert.tsx";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -10,6 +11,7 @@ import type {
   ToolFeedItem,
   GroupedEventFeedItem,
 } from "@/reducers";
+import { grokPlayAudio, grokGetAudioDuration, type AudioPlaybackHandle } from "@/reducers";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message.tsx";
 import { Shimmer } from "@/components/ai-elements/shimmer.tsx";
 import {
@@ -28,6 +30,13 @@ function getMessageText(content: { type: string; text: string }[]): string {
     .join("");
 }
 
+/** Format duration as m:ss */
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 const MessageBubble = memo(function MessageBubble({
   msg,
   isStreaming,
@@ -37,6 +46,33 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const text = getMessageText(msg.content);
   const timeStr = new Date(msg.timestamp).toLocaleTimeString();
+  const hasAudio = !!msg.audioData;
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const playbackRef = useRef<AudioPlaybackHandle | null>(null);
+
+  const duration = useMemo(
+    () => (msg.audioData ? grokGetAudioDuration(msg.audioData) : 0),
+    [msg.audioData],
+  );
+
+  const handlePlayPause = useCallback(() => {
+    if (isPlaying) {
+      // Stop playback
+      playbackRef.current?.stop();
+      playbackRef.current = null;
+      setIsPlaying(false);
+    } else if (msg.audioData) {
+      // Start playback
+      playbackRef.current = grokPlayAudio(msg.audioData, () => {
+        setIsPlaying(false);
+        playbackRef.current = null;
+      });
+      if (playbackRef.current) {
+        setIsPlaying(true);
+      }
+    }
+  }, [isPlaying, msg.audioData]);
 
   return (
     <Message from={msg.role}>
@@ -46,9 +82,25 @@ const MessageBubble = memo(function MessageBubble({
           <span>·</span>
           <span>{timeStr}</span>
           {isStreaming && <span className="animate-pulse">●</span>}
+          {hasAudio && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-5 w-5 p-0"
+                onClick={handlePlayPause}
+                title={isPlaying ? "Pause" : "Play audio"}
+              >
+                {isPlaying ? <PauseIcon className="h-3 w-3" /> : <PlayIcon className="h-3 w-3" />}
+              </Button>
+              <span className="tabular-nums">{formatDuration(duration)}</span>
+            </>
+          )}
         </div>
         {text ? (
           <MessageResponse>{text}</MessageResponse>
+        ) : hasAudio ? (
+          <span className="opacity-60 italic text-sm">[Audio message]</span>
         ) : isStreaming ? (
           <Shimmer className="text-sm">Thinking...</Shimmer>
         ) : (
