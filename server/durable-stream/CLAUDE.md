@@ -48,14 +48,14 @@ Effect-native event streaming infrastructure with AI integration.
 ServerLive(port)
  └─ AppLive
      └─ StreamManager.agentLayer
-         └─ StreamManager.liveLayer
-             ├─ StreamStorage.fileSystemLayer
-             │   └─ NodeContext.layer
-             └─ AiClient.layer
-                 ├─ LanguageModel (OpenAI)
-                 │   └─ OpenAiClient.layer
-                 └─ GrokVoiceClient.Default
-                     └─ GrokVoiceConfig.defaultLayer
+         ├─ StreamManager.liveLayer
+         │   └─ StreamStorage.fileSystemLayer
+         │       └─ NodeContext.layer
+         └─ AiClient.layer
+             ├─ LanguageModel (OpenAI)
+             │   └─ OpenAiClient.layer
+             └─ GrokVoiceClient.Default
+                 └─ GrokVoiceConfig.defaultLayer
 ```
 
 ## Data Flow
@@ -77,7 +77,7 @@ agentLayer.append()
     |                              |
     |                        stream responses
     |                              |
-    +-- other event               |
+    +-- other event                |
     |                              |
     v                              v
 inner.append() <------------------+
