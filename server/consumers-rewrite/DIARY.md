@@ -4,6 +4,73 @@ Append-only log of significant changes and decisions.
 
 ---
 
+## 2026-01-21 ~17:30
+
+### Added typed EventSchema system
+
+**Problem:** Event handling used untyped payloads with runtime checks:
+
+```typescript
+if (event.type === "iterate:agent:action:send-user-message:called") {
+  const content = event.payload["content"];
+  if (typeof content === "string") { ... }
+}
+```
+
+**Solution:** Created `EventSchema` factory in `events.ts` that provides:
+
+- `make(payload)` - typed event creation
+- `is(event)` - type guard with discriminant for proper narrowing
+- `decodeOption(event)` - Option-based parsing
+- `decode(event)` - Effect-based parsing with ParseError
+
+**Key insight:** The type guard must include the `type` discriminant, not just payload shape:
+
+```typescript
+// Wrong - causes TypeScript to narrow to `never` after multiple checks
+event is EventInput & { payload: P }
+
+// Correct - only excludes events with this specific type
+event is E & { type: Type; payload: P }
+```
+
+Also made the guard generic (`<E extends EventInput | Event>`) to preserve `Event` properties when narrowing.
+
+Refactored `openai-simple.ts` to use EventSchema for all event handling - much cleaner.
+
+---
+
+### Typed history array with Prompt.Message
+
+Changed `history: Schema.Array(Schema.Any)` to `Schema.Array(Schema.encodedSchema(Prompt.Message))`.
+
+Using `encodedSchema()` because we build plain `{ role, content }` objects (the encoded format), not full `Message` instances with branded type IDs. The `MessageEncoded` type accepts string content directly.
+
+---
+
+### Simplified shouldTriggerLlmResponse
+
+Replaced nested `Option.match` with early returns:
+
+```typescript
+// Before
+return Option.match(this.llmRequestRequiredFrom, {
+  onNone: () => false,
+  onSome: (requiredFrom) =>
+    Option.match(this.llmLastRespondedAt, {
+      onNone: () => true,
+      onSome: (respondedAt) => Offset.gt(requiredFrom, respondedAt),
+    }),
+});
+
+// After
+if (Option.isNone(this.llmRequestRequiredFrom)) return false;
+if (Option.isNone(this.llmLastRespondedAt)) return true;
+return Offset.gt(this.llmRequestRequiredFrom.value, this.llmLastRespondedAt.value);
+```
+
+---
+
 ## 2026-01-21 16:15
 
 ### Fixed LLM re-triggering loop
