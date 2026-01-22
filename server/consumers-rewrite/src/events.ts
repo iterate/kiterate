@@ -8,10 +8,20 @@ import { Event, EventInput, EventType } from "./domain.js";
 // EventSchema
 // -------------------------------------------------------------------------------------
 
+/** The narrowed type returned by EventSchema.make() */
+type TypedEventInput<Type extends string, P> = EventInput & {
+  readonly type: Type;
+  readonly payload: P;
+};
+
 interface EventSchema<Type extends string, P> {
   readonly type: EventType;
   readonly typeString: Type;
-  readonly make: {} extends P ? (payload?: P) => EventInput : (payload: P) => EventInput;
+  /** Phantom type for extracting the event type: `type MyEvent = typeof MyEvent.Type` */
+  readonly Type: TypedEventInput<Type, P>;
+  readonly make: {} extends P
+    ? (payload?: P) => TypedEventInput<Type, P>
+    : (payload: P) => TypedEventInput<Type, P>;
   readonly decodeOption: (event: EventInput | Event) => Option.Option<P>;
   readonly decode: (event: EventInput | Event) => Effect.Effect<P, ParseResult.ParseError>;
   /** Type guard that includes the discriminant for proper narrowing, preserving Event vs EventInput */
@@ -35,11 +45,12 @@ export const EventSchema = {
     return {
       type: eventType,
       typeString: type,
+      Type: undefined as unknown as TypedEventInput<Type, P>, // phantom type
       make: (payload?: P) =>
         EventInput.make({
           type: eventType,
           payload: payload ?? {},
-        }),
+        }) as TypedEventInput<Type, P>,
       decodeOption: (event) => {
         if (String(event.type) !== type) return Option.none();
         return decodePayloadOption(event.payload);
@@ -75,6 +86,7 @@ export const ConfigSetEvent = EventSchema.make("iterate:agent:config:set", {
 export const UserMessageEvent = EventSchema.make("iterate:agent:action:send-user-message:called", {
   content: Schema.String,
 });
+export type UserMessageEvent = typeof UserMessageEvent.Type;
 
 export const UserAudioEvent = EventSchema.make("iterate:agent:action:send-user-audio:called", {
   audio: Schema.String,
