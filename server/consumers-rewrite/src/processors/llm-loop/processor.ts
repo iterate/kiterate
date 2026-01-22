@@ -234,7 +234,15 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
         systemPrompt: string;
       }) =>
         Effect.gen(function* () {
-          const requestOffset = yield* stream.append(RequestStartedEvent.make());
+          // Build prompt with system message
+          const prompt: Prompt.MessageEncoded[] = [
+            { role: "system", content: systemPrompt },
+            ...history,
+          ];
+
+          const requestOffset = yield* stream.append(
+            RequestStartedEvent.make({ requestParams: prompt }),
+          );
           const previousRequestOffset = yield* activeRequestFiber.replace(requestOffset);
           if (Option.isSome(previousRequestOffset)) {
             yield* stream.append(
@@ -245,12 +253,6 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
           }
 
           yield* Effect.log(`triggering generation, history=${history.length} messages`);
-
-          // Build prompt with system message
-          const prompt: Prompt.MessageEncoded[] = [
-            { role: "system", content: systemPrompt },
-            ...history,
-          ];
 
           const requestEffect = lm.streamText({ prompt }).pipe(
             Stream.runForEach((part) =>

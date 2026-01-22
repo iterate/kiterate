@@ -57,7 +57,16 @@ const CODEMODE_SYSTEM_PROMPT = dedent`
   </codemode>
 
   The code will be evaluated and the result (or error) will be returned to you in a follow-up message.
-  You can access environment variables via \`process.env\`.
+  You can access environment variables via \`process.env\`. If you want to check which are available, run \`console.log(Object.keys(process.env))\`.
+
+  For example, if they ask you to use slack and you don't have a token, you can do this:
+
+  <codemode>
+  async function codemode() {
+    return Object.keys(process.env).filter(k => k.match(/SLACK/i));
+  }
+  </codemode>
+
   Use codemode when you need to fetch data, perform calculations, or interact with external services.
 `;
 

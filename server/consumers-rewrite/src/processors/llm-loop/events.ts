@@ -13,7 +13,9 @@ import { EventSchema } from "../../events.js";
 // Request Lifecycle Events
 // -------------------------------------------------------------------------------------
 
-export const RequestStartedEvent = EventSchema.make("iterate:llm-loop:request-started", {});
+export const RequestStartedEvent = EventSchema.make("iterate:llm-loop:request-started", {
+  requestParams: Schema.Unknown,
+});
 
 const _ResponseSseEvent = EventSchema.make("iterate:llm-loop:response:sse", {
   part: Schema.Unknown,
