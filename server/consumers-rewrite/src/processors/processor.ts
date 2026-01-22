@@ -17,9 +17,6 @@ import { StreamManager } from "../services/stream-manager/index.js";
  * A path-scoped stream interface for processors.
  */
 export interface ProcessorStream {
-  /** The path this stream is scoped to */
-  readonly path: StreamPath;
-
   /** Subscribe to live events on this path, optionally starting after an offset */
   readonly subscribe: (options?: { from?: Offset }) => Stream.Stream<Event>;
 
@@ -63,8 +60,6 @@ export const toLayer = <R>(
       const activePaths = new Set<StreamPath>();
 
       const makeStream = (path: StreamPath): ProcessorStream => ({
-        path,
-
         subscribe: (options) =>
           streamManager
             .subscribe({

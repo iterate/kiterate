@@ -142,7 +142,6 @@ export const MyProcessor: Processor<LanguageModel> = {
   name: "MyProcessor",
   run: (stream) =>
     Effect.gen(function* () {
-      // stream.path - the path this processor is scoped to
       // stream.subscribe() - live events
       // stream.read() - historical events
       // stream.append() - emit new events
