@@ -14,6 +14,7 @@
  * </codemode>
  * ```
  */
+import dedent from "dedent";
 import { Effect, Option, Schema, Stream } from "effect";
 
 import { Event, Offset } from "../../domain.js";
@@ -63,17 +64,21 @@ const createResultSummary = (
   const logsSection = logs.length > 0 ? `\n\nConsole logs:\n${formatLogs(logs)}` : "";
 
   if (success) {
-    return `[Codemode execution completed successfully]
+    return dedent`
+      [Codemode execution completed successfully]
 
-Output: ${output ?? "undefined"}${logsSection}
+      Output: ${output ?? "undefined"}${logsSection}
 
-Please let the user know how it went. If you think it might be useful to generate a new codemode block, do so.`;
+      Please let the user know how it went. If you think it might be useful to generate a new codemode block, do so.
+    `;
   } else {
-    return `[Codemode execution failed]
+    return dedent`
+      [Codemode execution failed]
 
-Error: ${error ?? "Unknown error"}${logsSection}
+      Error: ${error ?? "Unknown error"}${logsSection}
 
-Please let the user know what went wrong and try again if appropriate.`;
+      Please let the user know what went wrong and try again if appropriate.
+    `;
   }
 };
 
