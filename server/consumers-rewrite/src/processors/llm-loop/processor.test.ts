@@ -159,7 +159,7 @@ describe("LlmLoopProcessor", () => {
       yield* stream.waitForSubscribe();
 
       const interval = Duration.millis(150);
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < 13; i++) {
         yield* stream.appendEvent(UserMessageEvent.make({ content: `Message ${i}` }));
         yield* Effect.yieldNow();
         yield* TestClock.adjust(interval);
@@ -167,10 +167,6 @@ describe("LlmLoopProcessor", () => {
 
       const beforeMaxWait = yield* stream.getEvents();
       expect(beforeMaxWait.filter(RequestStartedEvent.is)).toHaveLength(0);
-
-      yield* TestClock.adjust(Duration.millis(150));
-      const stillBefore = yield* stream.getEvents();
-      expect(stillBefore.filter(RequestStartedEvent.is)).toHaveLength(0);
 
       yield* TestClock.adjust(Duration.millis(50));
       yield* lm.waitForCall();
