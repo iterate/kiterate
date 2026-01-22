@@ -1,4 +1,5 @@
 import { useState, memo, useCallback, useRef, useMemo } from "react";
+import { useLocalStorage } from "usehooks-ts";
 import { PlayIcon, PauseIcon, CodeIcon, TypeIcon } from "lucide-react";
 import { HarnessErrorAlert } from "./harness-error-alert.tsx";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block.tsx";
@@ -49,7 +50,7 @@ const MessageBubble = memo(function MessageBubble({
   const hasAudio = !!msg.audioData;
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [showRaw, setShowRaw] = useState(false);
+  const [showRaw, setShowRaw] = useLocalStorage("kiterate:showRawMessages", false);
   const playbackRef = useRef<AudioPlaybackHandle | null>(null);
 
   const duration = useMemo(
