@@ -1,9 +1,11 @@
 import { Response } from "@effect/ai";
 import { it, expect } from "@effect/vitest";
+import dedent from "dedent";
 import { Effect } from "effect";
 
-import { StreamPath } from "../../domain.js";
-import { makeTestSimpleStream } from "../../testing/index.js";
+import { Offset, StreamPath } from "../../domain.js";
+import { UserMessageEvent } from "../../events.js";
+import { makeTestSimpleStream, type TestSimpleStream } from "../../testing/index.js";
 import { RequestEndedEvent, RequestStartedEvent, ResponseSseEvent } from "../llm-loop/events.js";
 import {
   CodeBlockAddedEvent,
@@ -32,6 +34,18 @@ const decodeFailed = (event: { payload: unknown }) => {
   return payload;
 };
 
+// Helper to emit a codemode block
+const emitCodemodeBlock = (stream: TestSimpleStream, requestOffset: Offset, code: string) =>
+  Effect.gen(function* () {
+    yield* stream.appendEvent(
+      ResponseSseEvent.make({
+        part: Response.textDeltaPart({ id: "msg1", delta: code }),
+        requestOffset,
+      }),
+    );
+    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+  });
+
 // -------------------------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------------------------
@@ -40,25 +54,20 @@ it.scoped("parses codemode block and evaluates successfully", () =>
   Effect.gen(function* () {
     const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
-    // Setup codemode processor (we don't need llm-loop for this test)
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    // Send a user message (would be done by the system, triggers LLM)
-    // For this test, we'll manually append the LLM response events
-
-    // Append request started
-    const requestStarted = yield* stream.append(RequestStartedEvent.make());
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
     // Emit SSE events with a codemode block
-    yield* stream.append(
+    yield* stream.appendEvent(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({ id: "msg1", delta: "Here's some code:\n" }),
         requestOffset,
       }),
     );
-    yield* stream.append(
+    yield* stream.appendEvent(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -68,8 +77,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
       }),
     );
 
-    // End the request - this triggers codemode parsing
-    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for codemode events
     const added = yield* stream.waitForEvent(CodeBlockAddedEvent);
@@ -84,6 +92,11 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     expect(done.requestId).toBe(added.payload.requestId);
     expect(done.output.success).toBe(true);
     expect(done.output.data).toBe("42");
+
+    // Should append a user message summarizing the result
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("completed successfully");
+    expect(userMsg.payload.content).toContain("42");
   }),
 );
 
@@ -91,33 +104,24 @@ it.scoped("captures console.log calls", () =>
   Effect.gen(function* () {
     const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
-    // Setup codemode processor only
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    // Append request started and SSE with logging code
-    const requestStarted = yield* stream.append(RequestStartedEvent.make());
-    const requestOffset = requestStarted.offset;
-
-    yield* stream.append(
-      ResponseSseEvent.make({
-        part: Response.textDeltaPart({
-          id: "msg1",
-          delta: `<codemode>
-async function codemode() {
-  console.log("hello", "world");
-  console.log(123);
-  return "done";
-}
-</codemode>`,
-        }),
-        requestOffset,
-      }),
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          console.log("hello", "world");
+          console.log(123);
+          return "done";
+        }
+        </codemode>
+      `,
     );
 
-    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
-
-    // Wait for completion
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
     expect(done.output.data).toBe('"done"');
@@ -135,30 +139,28 @@ it.scoped("handles evaluation errors", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.append(RequestStartedEvent.make());
-    const requestOffset = requestStarted.offset;
-
-    yield* stream.append(
-      ResponseSseEvent.make({
-        part: Response.textDeltaPart({
-          id: "msg1",
-          delta: `<codemode>
-async function codemode() {
-  throw new Error("intentional error");
-}
-</codemode>`,
-        }),
-        requestOffset,
-      }),
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          throw new Error("intentional error");
+        }
+        </codemode>
+      `,
     );
 
-    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
-
-    // Wait for failure
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
     expect(failed.output.success).toBe(false);
     expect(failed.output.error).toContain("intentional error");
+
+    // Should append a user message about the failure
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("failed");
+    expect(userMsg.payload.content).toContain("intentional error");
   }),
 );
 
@@ -169,22 +171,16 @@ it.scoped("handles missing codemode function", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.append(RequestStartedEvent.make());
-    const requestOffset = requestStarted.offset;
-
-    yield* stream.append(
-      ResponseSseEvent.make({
-        part: Response.textDeltaPart({
-          id: "msg1",
-          delta: `<codemode>
-const x = 42;
-</codemode>`,
-        }),
-        requestOffset,
-      }),
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        const x = 42;
+        </codemode>
+      `,
     );
-
-    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
@@ -200,39 +196,33 @@ it.scoped("handles multiple codemode blocks", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.append(RequestStartedEvent.make());
-    const requestOffset = requestStarted.offset;
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        First block:
+        <codemode>
+        async function codemode() {
+          return 1;
+        }
+        </codemode>
 
-    yield* stream.append(
-      ResponseSseEvent.make({
-        part: Response.textDeltaPart({
-          id: "msg1",
-          delta: `First block:
-<codemode>
-async function codemode() {
-  return 1;
-}
-</codemode>
-
-Second block:
-<codemode>
-async function codemode() {
-  return 2;
-}
-</codemode>`,
-        }),
-        requestOffset,
-      }),
+        Second block:
+        <codemode>
+        async function codemode() {
+          return 2;
+        }
+        </codemode>
+      `,
     );
-
-    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for both code blocks
     const added1 = yield* stream.waitForEvent(CodeBlockAddedEvent);
     const added2 = yield* stream.waitForEvent(CodeBlockAddedEvent);
 
-    expect(added1.payload.requestId).toBe(`${requestOffset}.0`);
-    expect(added2.payload.requestId).toBe(`${requestOffset}.1`);
+    expect(added1.payload.requestId).toBe(`${requestStarted.offset}.0`);
+    expect(added2.payload.requestId).toBe(`${requestStarted.offset}.1`);
 
     // Wait for both completions
     const done1Event = yield* stream.waitForEvent(CodeEvalDoneEvent);
@@ -252,30 +242,156 @@ it.scoped("handles non-serializable return values", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.append(RequestStartedEvent.make());
-    const requestOffset = requestStarted.offset;
-
-    yield* stream.append(
-      ResponseSseEvent.make({
-        part: Response.textDeltaPart({
-          id: "msg1",
-          delta: `<codemode>
-async function codemode() {
-  const obj = {};
-  obj.self = obj; // circular reference
-  return obj;
-}
-</codemode>`,
-        }),
-        requestOffset,
-      }),
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          const obj = {};
+          obj.self = obj; // circular reference
+          return obj;
+        }
+        </codemode>
+      `,
     );
-
-    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
     expect(done.output.success).toBe(true);
     expect(done.output.data).toContain("non-serializable");
+  }),
+);
+
+// -------------------------------------------------------------------------------------
+// User Message Summary Tests
+// -------------------------------------------------------------------------------------
+
+it.scoped("appends user message with output after successful execution", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          return { status: "ok", count: 42 };
+        }
+        </codemode>
+      `,
+    );
+
+    yield* stream.waitForEvent(CodeEvalDoneEvent);
+
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("[Codemode execution completed successfully]");
+    expect(userMsg.payload.content).toContain("Output:");
+    expect(userMsg.payload.content).toContain('"status":"ok"');
+    expect(userMsg.payload.content).toContain('"count":42');
+    expect(userMsg.payload.content).toContain("Please let the user know how it went");
+  }),
+);
+
+it.scoped("appends user message with error after failed execution", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          throw new Error("database connection failed");
+        }
+        </codemode>
+      `,
+    );
+
+    yield* stream.waitForEvent(CodeEvalFailedEvent);
+
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("[Codemode execution failed]");
+    expect(userMsg.payload.content).toContain("Error:");
+    expect(userMsg.payload.content).toContain("database connection failed");
+    expect(userMsg.payload.content).toContain("try again if appropriate");
+  }),
+);
+
+it.scoped("includes console logs in user message summary", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          console.log("Starting process...");
+          console.log("Step 1 complete", { items: 5 });
+          console.log("Finished!");
+          return "success";
+        }
+        </codemode>
+      `,
+    );
+
+    yield* stream.waitForEvent(CodeEvalDoneEvent);
+
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("Console logs:");
+    expect(userMsg.payload.content).toContain("Starting process...");
+    expect(userMsg.payload.content).toContain("Step 1 complete");
+    expect(userMsg.payload.content).toContain("items");
+    expect(userMsg.payload.content).toContain("Finished!");
+  }),
+);
+
+it.scoped("includes console logs in failed execution summary", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          console.log("Attempting operation...");
+          console.log("Warning: retrying...");
+          throw new Error("max retries exceeded");
+        }
+        </codemode>
+      `,
+    );
+
+    yield* stream.waitForEvent(CodeEvalFailedEvent);
+
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("[Codemode execution failed]");
+    expect(userMsg.payload.content).toContain("Console logs:");
+    expect(userMsg.payload.content).toContain("Attempting operation...");
+    expect(userMsg.payload.content).toContain("Warning: retrying...");
+    expect(userMsg.payload.content).toContain("max retries exceeded");
   }),
 );

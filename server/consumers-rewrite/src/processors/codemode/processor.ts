@@ -14,9 +14,11 @@
  * </codemode>
  * ```
  */
+import dedent from "dedent";
 import { Effect, Option, Schema, Stream } from "effect";
 
 import { Event, Offset } from "../../domain.js";
+import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { RequestEndedEvent, ResponseSseEvent } from "../llm-loop/events.js";
 import {
@@ -34,6 +36,51 @@ import {
 
 const CODEMODE_OPEN_TAG = "<codemode>";
 const CODEMODE_CLOSE_TAG = "</codemode>";
+
+/**
+ * Format logs for display in the summary message.
+ */
+const formatLogs = (logs: Array<LogEntry>): string => {
+  if (logs.length === 0) return "No console output.";
+  return logs
+    .map((log) => {
+      const argsStr = log.args
+        .map((arg) => (typeof arg === "string" ? arg : JSON.stringify(arg)))
+        .join(" ");
+      return `[${new Date(log.timestamp).toLocaleTimeString()}] ${argsStr}`;
+    })
+    .join("\n");
+};
+
+/**
+ * Create a summary message for the LLM after code evaluation.
+ */
+const createResultSummary = (
+  success: boolean,
+  output: string | undefined,
+  error: string | undefined,
+  logs: Array<LogEntry>,
+): string => {
+  const logsSection = logs.length > 0 ? `\n\nConsole logs:\n${formatLogs(logs)}` : "";
+
+  if (success) {
+    return dedent`
+      [Codemode execution completed successfully]
+
+      Output: ${output ?? "undefined"}${logsSection}
+
+      Please let the user know how it went. If you think it might be useful to generate a new codemode block, do so.
+    `;
+  } else {
+    return dedent`
+      [Codemode execution failed]
+
+      Error: ${error ?? "Unknown error"}${logsSection}
+
+      Please let the user know what went wrong and try again if appropriate.
+    `;
+  }
+};
 
 // -------------------------------------------------------------------------------------
 // State
@@ -135,7 +182,6 @@ const executeCode = async (
       });
     `;
 
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const factory = new Function(wrappedCode)();
     const result = await factory(capturedConsole);
 
@@ -289,6 +335,15 @@ export const CodemodeProcessor: Processor<never> = {
                   }),
                 );
                 yield* Effect.log(`code block ${requestId} completed successfully`);
+
+                // Append a fake user message to inform the LLM of the result
+                const summary = createResultSummary(
+                  true,
+                  result.output.data,
+                  undefined,
+                  result.logs,
+                );
+                yield* stream.append(UserMessageEvent.make({ content: summary }));
               } else {
                 yield* stream.append(
                   CodeEvalFailedEvent.make({
@@ -298,6 +353,15 @@ export const CodemodeProcessor: Processor<never> = {
                   }),
                 );
                 yield* Effect.log(`code block ${requestId} failed: ${result.output.error}`);
+
+                // Append a fake user message to inform the LLM of the failure
+                const summary = createResultSummary(
+                  false,
+                  undefined,
+                  result.output.error,
+                  result.logs,
+                );
+                yield* stream.append(UserMessageEvent.make({ content: summary }));
               }
             }
           }),
