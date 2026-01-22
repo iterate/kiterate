@@ -32,22 +32,15 @@ export const fileSystemLayer = (
       const getFilePath = (streamPath: StreamPath) =>
         path.join(basePath, `${streamPath.replace(/\//g, "_")}.yaml`);
 
-      const readOffsetFile = (streamPath: StreamPath) =>
-        Effect.gen(function* () {
-          const offsetPath = getFilePath(streamPath) + ".offset";
-          const exists = yield* fs.exists(offsetPath);
-          if (!exists) return 0;
-          const content = yield* fs.readFileString(offsetPath);
-          return parseInt(content.trim(), 10) || 0;
-        });
-
-      const writeOffsetFile = (streamPath: StreamPath, offset: number) =>
-        Effect.gen(function* () {
-          const offsetPath = getFilePath(streamPath) + ".offset";
-          yield* fs.writeFileString(offsetPath, offset.toString());
-        });
-
       const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
+
+      const countExistingDocs = (filePath: string) =>
+        Effect.gen(function* () {
+          const exists = yield* fs.exists(filePath);
+          if (!exists) return 0;
+          const content = yield* fs.readFileString(filePath);
+          return YAML.parseAllDocuments(content).length;
+        });
 
       const append = ({
         path: streamPath,
@@ -59,9 +52,9 @@ export const fileSystemLayer = (
         Effect.gen(function* () {
           const filePath = getFilePath(streamPath);
 
-          // Get and increment offset
-          const nextOffset = yield* readOffsetFile(streamPath);
-          const offset = formatOffset(nextOffset);
+          // Derive offset from existing document count
+          const docCount = yield* countExistingDocs(filePath);
+          const offset = formatOffset(docCount);
           const createdAt = yield* DateTime.now;
           const version = input.version ?? Version.make("1");
           const event = Event.make({ ...input, path: streamPath, offset, createdAt, version });
@@ -71,9 +64,6 @@ export const fileSystemLayer = (
           const yaml = YAML.stringify(encoded);
           const doc = "---\n" + yaml;
           yield* fs.writeFile(filePath, new TextEncoder().encode(doc), { flag: "a" });
-
-          // Update offset file
-          yield* writeOffsetFile(streamPath, nextOffset + 1);
 
           return event;
         }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause })));
