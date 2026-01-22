@@ -7,7 +7,7 @@ describe("iterateReducer", () => {
 
     // response-metadata starts the response
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "response-metadata",
@@ -20,7 +20,7 @@ describe("iterateReducer", () => {
 
     // text-start begins a text message
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "text-start",
@@ -34,7 +34,7 @@ describe("iterateReducer", () => {
 
     // text-delta adds text chunks
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "text-delta",
@@ -47,7 +47,7 @@ describe("iterateReducer", () => {
     expect(state.streamingText).toBe("Hello");
 
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "text-delta",
@@ -60,7 +60,7 @@ describe("iterateReducer", () => {
     expect(state.streamingText).toBe("Hello!");
 
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "text-delta",
@@ -74,7 +74,7 @@ describe("iterateReducer", () => {
 
     // text-end finalizes the message
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "text-end",
@@ -98,20 +98,20 @@ describe("iterateReducer", () => {
     let state = createInitialIterateState();
 
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: { part: { type: "text-start", id: "msg_456" } },
       createdAt: "2026-01-20T15:38:42.622Z",
     });
 
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: { part: { type: "text-delta", id: "msg_456", delta: "Partial text" } },
       createdAt: "2026-01-20T15:38:42.632Z",
     });
 
     // finish without text-end should still finalize
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: {
         part: {
           type: "finish",
@@ -133,14 +133,14 @@ describe("iterateReducer", () => {
 
     // Start message
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: { part: { type: "text-start", id: "msg_789" } },
       createdAt: "2026-01-20T15:38:42.622Z",
     });
 
     // First delta - adds message to feed
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: { part: { type: "text-delta", id: "msg_789", delta: "First" } },
       createdAt: "2026-01-20T15:38:42.632Z",
     });
@@ -148,7 +148,7 @@ describe("iterateReducer", () => {
 
     // Second delta - should update in place
     state = iterateReducer(state, {
-      type: "iterate:openai:response:sse",
+      type: "iterate:llm-loop:response:sse",
       payload: { part: { type: "text-delta", id: "msg_789", delta: " Second" } },
       createdAt: "2026-01-20T15:38:42.640Z",
     });

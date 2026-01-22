@@ -126,7 +126,7 @@ export function createInitialWrapperState(): WrapperState {
 const PI_EVENT = "iterate:agent:harness:pi:event-received";
 const CLAUDE_EVENT = "iterate:agent:harness:claude:event-received";
 const OPENCODE_EVENT = "iterate:agent:harness:opencode:event-received";
-const OPENAI_EVENT = "iterate:openai:response:sse";
+const OPENAI_EVENT = "iterate:llm-loop:response:sse";
 const GROK_EVENT = "iterate:grok:response:sse";
 const CONFIG_EVENT = "iterate:agent:config:set";
 const USER_MSG = "iterate:agent:action:send-user-message:called";

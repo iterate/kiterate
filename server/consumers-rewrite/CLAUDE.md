@@ -130,15 +130,15 @@ Storage.read()     PubSub.subscribe()
 
 ## Key Event Types
 
-| Event Type                                      | Trigger                                                    |
-| ----------------------------------------------- | ---------------------------------------------------------- |
-| `iterate:agent:config:set`                      | Switch AI model (`payload.model: "openai" \| "grok"`)      |
-| `iterate:agent:action:send-user-message:called` | User message, triggers AI                                  |
-| `iterate:openai:request-started`                | LLM request initiated                                      |
-| `iterate:openai:response:sse`                   | OpenAI streaming response chunk (text-delta, finish, etc.) |
-| `iterate:openai:request-ended`                  | LLM request completed successfully                         |
-| `iterate:openai:request-cancelled`              | LLM request failed or interrupted                          |
-| `iterate:grok:response:sse`                     | Grok streaming response event                              |
+| Event Type                                      | Trigger                                                 |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| `iterate:agent:config:set`                      | Switch AI model (`payload.model: "openai" \| "grok"`)   |
+| `iterate:agent:action:send-user-message:called` | User message, triggers AI                               |
+| `iterate:llm-loop:request-started`              | LLM request initiated                                   |
+| `iterate:llm-loop:response:sse`                 | LLM streaming response chunk (text-delta, finish, etc.) |
+| `iterate:llm-loop:request-ended`                | LLM request completed successfully                      |
+| `iterate:llm-loop:request-cancelled`            | LLM request failed or interrupted                       |
+| `iterate:grok:response:sse`                     | Grok streaming response event                           |
 
 ## Storage Format
 
@@ -152,7 +152,7 @@ offset: "0000000000000001"
 createdAt: "2026-01-20T12:00:00.000Z"
 version: "1"
 ---
-type: "iterate:openai:response:sse"
+type: "iterate:llm-loop:response:sse"
 payload:
   part: "Hi there!"
 offset: "0000000000000002"

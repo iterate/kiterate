@@ -31,7 +31,7 @@ for (const event of docs) {
   }
 
   // Assistant text delta
-  if (event.type === "iterate:openai:response:sse") {
+  if (event.type === "iterate:llm-loop:response:sse") {
     const part = event.payload.part;
     if (part?.type === "text-delta") {
       currentAssistant += part.delta;
@@ -39,13 +39,13 @@ for (const event of docs) {
   }
 
   // Request ended - flush assistant
-  if (event.type === "iterate:openai:request-ended" && currentAssistant) {
+  if (event.type === "iterate:llm-loop:request-ended" && currentAssistant) {
     console.log(`\x1b[32mAssistant:\x1b[0m ${currentAssistant}\n`);
     currentAssistant = "";
   }
 
   // Request cancelled
-  if (event.type === "iterate:openai:request-cancelled") {
+  if (event.type === "iterate:llm-loop:request-cancelled") {
     console.log(`\x1b[31m[Request cancelled]\x1b[0m\n`);
     currentAssistant = "";
   }
