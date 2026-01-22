@@ -3,6 +3,7 @@ import { it, expect } from "@effect/vitest";
 import { Effect } from "effect";
 
 import { StreamPath } from "../../domain.js";
+import { UserMessageEvent } from "../../events.js";
 import { makeTestSimpleStream } from "../../testing/index.js";
 import { RequestEndedEvent, RequestStartedEvent, ResponseSseEvent } from "../llm-loop/events.js";
 import {
@@ -84,6 +85,11 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     expect(done.requestId).toBe(added.payload.requestId);
     expect(done.output.success).toBe(true);
     expect(done.output.data).toBe("42");
+
+    // Should append a user message summarizing the result
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("completed successfully");
+    expect(userMsg.payload.content).toContain("42");
   }),
 );
 
@@ -159,6 +165,11 @@ async function codemode() {
     const failed = decodeFailed(failedEvent);
     expect(failed.output.success).toBe(false);
     expect(failed.output.error).toContain("intentional error");
+
+    // Should append a user message about the failure
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("failed");
+    expect(userMsg.payload.content).toContain("intentional error");
   }),
 );
 
