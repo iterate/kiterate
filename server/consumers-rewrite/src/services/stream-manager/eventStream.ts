@@ -78,21 +78,13 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
           const queue = yield* PubSub.subscribe(pubsub);
           const liveStream = Stream.fromQueue(queue);
 
-          const historicalStream = storage.read({ from: lastOffset });
-
           // Track last historical offset, then filter live to only new events
-          const trackedHistorical = historicalStream.pipe(
-            Stream.tap((event) => Effect.sync(() => (lastOffset = event.offset))),
-          );
+          const trackedHistorical = storage
+            .read({ from: lastOffset })
+            .pipe(Stream.tap((event) => Effect.sync(() => (lastOffset = event.offset))));
 
           const dedupedLive = liveStream.pipe(
-            Stream.filter((event) => {
-              if (Offset.gt(event.offset, lastOffset)) {
-                lastOffset = event.offset;
-                return true;
-              }
-              return false;
-            }),
+            Stream.dropWhile((event) => Offset.lte(event.offset, lastOffset)),
           );
 
           return Stream.concat(trackedHistorical, dedupedLive);
