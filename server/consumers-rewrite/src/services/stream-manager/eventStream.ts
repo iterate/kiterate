@@ -74,16 +74,23 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
         return event;
       });
 
+    // Handle subscription requests by combining historical + live events.
+    //
+    // Race condition we're avoiding: while reading historical events, new events
+    // may be appended and published to pubsub. Without dedup, subscriber would
+    // see duplicates (once from historical read, once from pubsub).
+    //
+    // Solution: subscribe to pubsub FIRST (so we don't miss anything), read
+    // historical while tracking the last offset seen, then dropWhile on live
+    // to skip any events we already emitted from historical.
     const beSubscribedTo = (options?: { from?: Offset }) =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
           let lastOffset = options?.from ?? Offset.make("-1");
 
-          // Subscribe to PubSub first (don't miss events during history replay)
           const queue = yield* PubSub.subscribe(pubsub);
           const liveStream = Stream.fromQueue(queue);
 
-          // Track last historical offset, then filter live to only new events
           const trackedHistorical = storage
             .read({ from: lastOffset })
             .pipe(Stream.tap((event) => Effect.sync(() => (lastOffset = event.offset))));
