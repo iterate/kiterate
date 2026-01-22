@@ -51,60 +51,23 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
       return storedEvent;
     });
 
-    const subscribe = ({ path, from }: { path?: StreamPath; from?: Offset }) =>
-      Stream.unwrap(
-        Effect.gen(function* () {
-          if (path !== undefined) {
-            // Single path subscription
+    const beSubscribedTo = ({ path, from }: { path?: StreamPath; from?: Offset }) => {
+      if (path !== undefined) {
+        // Single path subscription
+        return Stream.unwrap(
+          Effect.gen(function* () {
             const stream = yield* getOrCreateStream(path);
             return stream.subscribe({ ...(from !== undefined && { from }) });
-          }
+          }).pipe(Effect.withSpan("StreamManager.subscribe")),
+        ).pipe(Stream.catchAllCause(() => Stream.empty));
+      }
 
-          // All paths subscription - history + global PubSub for new events
-          const afterOffset = from ?? Offset.make("-1");
-          const existingPaths = yield* storageManager.listPaths();
-
-          return Stream.unwrapScoped(
-            Effect.gen(function* () {
-              // Subscribe to global PubSub first (don't miss events during history replay)
-              const queue = yield* PubSub.subscribe(globalPubSub);
-              const liveStream = Stream.fromQueue(queue);
-
-              // Read historical from storage for each path
-              const historicalStream =
-                existingPaths.length > 0
-                  ? Stream.mergeAll(
-                      existingPaths.map((p) => storageManager.read({ path: p, from: afterOffset })),
-                      { concurrency: "unbounded" },
-                    )
-                  : Stream.empty;
-
-              // Track last seen offset PER PATH for deduplication (offsets are path-local)
-              const lastOffsetByPath = new Map<StreamPath, Offset>();
-              existingPaths.forEach((p) => lastOffsetByPath.set(p, afterOffset));
-
-              const trackedHistorical = historicalStream.pipe(
-                Stream.tap((event) =>
-                  Effect.sync(() => lastOffsetByPath.set(event.path, event.offset)),
-                ),
-              );
-
-              const dedupedLive = liveStream.pipe(
-                Stream.filter((event) => {
-                  const lastOffset = lastOffsetByPath.get(event.path) ?? Offset.make("-1");
-                  if (Offset.gt(event.offset, lastOffset)) {
-                    lastOffsetByPath.set(event.path, event.offset);
-                    return true;
-                  }
-                  return false;
-                }),
-              );
-
-              return Stream.concat(trackedHistorical, dedupedLive);
-            }),
-          );
-        }).pipe(Effect.withSpan("StreamManager.subscribe")),
-      ).pipe(Stream.catchAllCause(() => Stream.empty));
+      // All paths subscription - live events only (use read({}) for historical)
+      // Use scoped: true to eagerly create the subscription when the stream is unwrapped
+      return Stream.unwrapScoped(Stream.fromPubSub(globalPubSub, { scoped: true })).pipe(
+        Stream.catchAllCause(() => Stream.empty),
+      );
+    };
 
     const read = ({ path, from, to }: { path?: StreamPath; from?: Offset; to?: Offset }) =>
       Stream.unwrap(
@@ -135,6 +98,6 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
         }).pipe(Effect.withSpan("StreamManager.read")),
       ).pipe(Stream.catchAllCause(() => Stream.empty));
 
-    return StreamManager.of({ forPath, append, subscribe, read });
+    return StreamManager.of({ forPath, append, subscribe: beSubscribedTo, read });
   }),
 );

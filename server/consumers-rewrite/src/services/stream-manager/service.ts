@@ -16,6 +16,7 @@ export class StreamManager extends Context.Tag("@app/StreamManager")<
     /** Get a path-scoped EventStream */
     readonly forPath: (path: StreamPath) => Effect.Effect<EventStream>;
 
+    // TODO: Add errors
     /** Subscribe to live events, optionally starting after an offset */
     readonly subscribe: (input: { path?: StreamPath; from?: Offset }) => Stream.Stream<Event>;
 

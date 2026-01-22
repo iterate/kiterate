@@ -196,71 +196,9 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("all paths subscribe receives history then live events", () =>
-    Effect.gen(function* () {
-      const manager = yield* StreamManager.StreamManager;
-      const pathA = StreamPath.make("test/all-live/a");
-      const pathB = StreamPath.make("test/all-live/b");
-
-      yield* manager.append({
-        path: pathA,
-        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "history" } }),
-      });
-      yield* manager.append({
-        path: pathB,
-        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "history" } }),
-      });
-
-      const historyReady = yield* Deferred.make<void>();
-      const seenHistory = yield* Ref.make(0);
-      const historyCount = 2;
-
-      const subscriber = yield* manager.subscribe({}).pipe(
-        Stream.tap(() =>
-          Ref.updateAndGet(seenHistory, (count) => count + 1).pipe(
-            Effect.flatMap((count) =>
-              count === historyCount ? Deferred.succeed(historyReady, void 0) : Effect.void,
-            ),
-          ),
-        ),
-        Stream.take(4),
-        Stream.runCollect,
-        Effect.fork,
-      );
-
-      yield* Deferred.await(historyReady);
-
-      yield* manager.append({
-        path: pathA,
-        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "live" } }),
-      });
-      yield* manager.append({
-        path: pathB,
-        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "live" } }),
-      });
-
-      const events = yield* Fiber.join(subscriber);
-      const arr = Chunk.toReadonlyArray(events);
-
-      expect(arr).toHaveLength(4);
-
-      const phases = arr.map((event) => event.payload["phase"]);
-      expect(phases.slice(0, 2)).toEqual(["history", "history"]);
-      expect(phases.slice(2)).toEqual(["live", "live"]);
-
-      const eventsA = arr.filter((event) => event.path === pathA);
-      const eventsB = arr.filter((event) => event.path === pathB);
-
-      expect(eventsA.map((event) => event.offset)).toEqual([
-        "0000000000000000",
-        "0000000000000001",
-      ]);
-      expect(eventsB.map((event) => event.offset)).toEqual([
-        "0000000000000000",
-        "0000000000000001",
-      ]);
-    }).pipe(Effect.provide(testLayer)),
-  );
+  // Note: "all paths subscribe" now returns live events only (no history replay).
+  // This is tested indirectly through processor tests which use the pattern:
+  //   read({}) for historical discovery, subscribe({}) for live events.
 
   it.effect("subscribe with from resumes without duplicates", () =>
     Effect.gen(function* () {

@@ -41,23 +41,6 @@ export const toLayer = <R>(
       // Track which paths we've started processors for
       const activePaths = new Set<StreamPath>();
 
-      const makeStream = (path: StreamPath): EventStream.EventStream => ({
-        subscribe: (options) =>
-          streamManager.subscribe({
-            path,
-            ...(options?.from !== undefined && { from: options.from }),
-          }),
-
-        read: (options) =>
-          streamManager.read({
-            path,
-            ...(options?.from !== undefined && { from: options.from }),
-            ...(options?.to !== undefined && { to: options.to }),
-          }),
-
-        append: (event) => streamManager.append({ path, event }),
-      });
-
       const startProcessor = (path: StreamPath) =>
         Effect.gen(function* () {
           if (activePaths.has(path)) return;
@@ -65,7 +48,7 @@ export const toLayer = <R>(
 
           yield* Effect.log(`starting for path=${path}`);
 
-          const stream = makeStream(path);
+          const stream = yield* streamManager.forPath(path);
           yield* processor.run(stream).pipe(
             Effect.provide(context),
             Effect.catchAllCause((cause) => Effect.logError(`error on path=${path}`, cause)),

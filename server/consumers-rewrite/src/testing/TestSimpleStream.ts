@@ -52,6 +52,8 @@ export interface TestEventStream extends EventStream.EventStream {
     count: number,
     options?: WaitOptions,
   ) => Effect.Effect<readonly TypedEvent<S>[]>;
+  /** Alias for append - convenient for tests */
+  readonly appendEvent: (input: EventInput) => Effect.Effect<Event>;
 }
 
 export const makeTestEventStream = (
@@ -194,6 +196,7 @@ export const makeTestEventStream = (
         }).pipe(Stream.unwrap),
 
       append: appendImpl,
+      appendEvent: appendImpl,
 
       // Test control methods
       getEvents: () => Effect.sync(() => events),
@@ -206,3 +209,7 @@ export const makeTestEventStream = (
       waitForEventCount: waitForEvents,
     };
   });
+
+// Aliases for backward compatibility
+export { makeTestEventStream as makeTestSimpleStream };
+export type { TestEventStream as TestSimpleStream };
