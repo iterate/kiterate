@@ -53,20 +53,18 @@ export interface EventStream {
 export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<EventStream> =>
   Effect.gen(function* () {
     // Boot: hydrate offset from history
-    const initialState = yield* storage.read().pipe(Stream.runFold(State.initial, reduce));
-    const stateRef = yield* Ref.make(initialState);
+    let state = yield* storage.read().pipe(Stream.runFold(State.initial, reduce));
 
     const pubsub = yield* PubSub.unbounded<Event>();
 
     const append = (eventInput: EventInput) =>
       Effect.gen(function* () {
-        const state = yield* Ref.get(stateRef);
         const nextOffset = formatOffset(offsetToNumber(state.lastOffset) + 1);
         const createdAt = yield* DateTime.now;
         const event = Event.make({ ...eventInput, path, offset: nextOffset, createdAt });
 
         yield* storage.append(event);
-        yield* Ref.set(stateRef, reduce(state, event));
+        state = reduce(state, event);
         yield* PubSub.publish(pubsub, event);
         return event;
       });
