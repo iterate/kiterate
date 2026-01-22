@@ -1,16 +1,19 @@
 import { Response } from "@effect/ai";
 import { describe, it, expect } from "@effect/vitest";
+import { Option } from "effect";
 import { Duration, Effect, TestClock } from "effect";
 
 import { StreamPath } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { TestLanguageModel, makeTestSimpleStream } from "../../testing/index.js";
 import {
+  LlmLoopActivatedEvent,
   RequestCancelledEvent,
   RequestEndedEvent,
   RequestInterruptedEvent,
   RequestStartedEvent,
   ResponseSseEvent,
+  SystemPromptEditEvent,
 } from "./events.js";
 import { LlmLoopProcessor, llmDebounce } from "./processor.js";
 
@@ -178,6 +181,138 @@ describe("LlmLoopProcessor", () => {
       const started = (yield* stream.getEvents()).filter(RequestStartedEvent.is);
       expect(started).toHaveLength(1);
       expect(started[0]?.offset).toBe(request.offset);
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("emits LlmLoopActivatedEvent when model is configured", () =>
+    Effect.gen(function* () {
+      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Configure openai model
+      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* Effect.yieldNow();
+
+      // Should emit activated event
+      const activated = yield* stream.waitForEvent(LlmLoopActivatedEvent);
+      expect(activated).toBeDefined();
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("handles SystemPromptEditEvent with append mode", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Allow processor to run through event loop
+      yield* Effect.yieldNow();
+      yield* stream.waitForEvent(LlmLoopActivatedEvent);
+
+      // Append to system prompt
+      yield* stream.appendEvent(
+        SystemPromptEditEvent.make({
+          mode: "append",
+          content: "You can also do math.",
+          source: Option.some("test"),
+        }),
+      );
+
+      // Send a user message to trigger LLM
+      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+
+      // Get the prompt that was sent to LLM
+      const call = yield* lm.waitForCall();
+      const prompt = call.prompt as Array<{ role: string; content: string }>;
+
+      // System message should have both default and appended content
+      const systemMsg = prompt.find((m) => m.role === "system");
+      expect(systemMsg?.content).toContain("helpful assistant");
+      expect(systemMsg?.content).toContain("You can also do math.");
+
+      yield* lm.complete();
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("handles SystemPromptEditEvent with replace mode", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Allow processor to run through event loop
+      yield* Effect.yieldNow();
+      yield* stream.waitForEvent(LlmLoopActivatedEvent);
+
+      // Replace system prompt entirely
+      yield* stream.appendEvent(
+        SystemPromptEditEvent.make({
+          mode: "replace",
+          content: "You are a pirate.",
+          source: Option.some("test"),
+        }),
+      );
+
+      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+
+      const call = yield* lm.waitForCall();
+      const prompt = call.prompt as Array<{ role: string; content: string }>;
+
+      const systemMsg = prompt.find((m) => m.role === "system");
+      expect(systemMsg?.content).toBe("You are a pirate.");
+      expect(systemMsg?.content).not.toContain("helpful assistant");
+
+      yield* lm.complete();
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("handles SystemPromptEditEvent with prepend mode", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Allow processor to run through event loop
+      yield* Effect.yieldNow();
+      yield* stream.waitForEvent(LlmLoopActivatedEvent);
+
+      // Prepend to system prompt
+      yield* stream.appendEvent(
+        SystemPromptEditEvent.make({
+          mode: "prepend",
+          content: "IMPORTANT: Always be concise.",
+          source: Option.some("test"),
+        }),
+      );
+
+      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+
+      const call = yield* lm.waitForCall();
+      const prompt = call.prompt as Array<{ role: string; content: string }>;
+
+      const systemMsg = prompt.find((m) => m.role === "system");
+      // Prepended content should come first
+      expect(systemMsg?.content).toMatch(/^IMPORTANT: Always be concise\./);
+      expect(systemMsg?.content).toContain("helpful assistant");
+
+      yield* lm.complete();
     }).pipe(Effect.provide(TestLanguageModel.layer)),
   );
 });

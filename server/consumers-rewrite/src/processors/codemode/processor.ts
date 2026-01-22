@@ -20,7 +20,12 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
-import { RequestEndedEvent, ResponseSseEvent } from "../llm-loop/events.js";
+import {
+  LlmLoopActivatedEvent,
+  RequestEndedEvent,
+  ResponseSseEvent,
+  SystemPromptEditEvent,
+} from "../llm-loop/events.js";
 import {
   CodeBlockAddedEvent,
   CodeEvalDoneEvent,
@@ -36,6 +41,25 @@ import {
 
 const CODEMODE_OPEN_TAG = "<codemode>";
 const CODEMODE_CLOSE_TAG = "</codemode>";
+
+/** System prompt instructions for codemode */
+const CODEMODE_SYSTEM_PROMPT = dedent`
+  ## Codemode
+
+  You can run JavaScript code by writing a no-args async function called \`codemode\` and surrounding it with XML blocks like this:
+
+  <codemode>
+  async function codemode() {
+    console.log("I can do whatever here!")
+    const res = await fetch("https://example.com")
+    return { exampleDotComIsUp: res.ok }
+  }
+  </codemode>
+
+  The code will be evaluated and the result (or error) will be returned to you in a follow-up message.
+  You can access environment variables via \`process.env\`.
+  Use codemode when you need to fetch data, perform calculations, or interact with external services.
+`;
 
 /**
  * Format logs for display in the summary message.
@@ -98,6 +122,8 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
   pendingEvaluation: Schema.Array(RequestId),
   /** Request IDs currently being evaluated */
   inProgress: Schema.Array(RequestId),
+  /** Whether we've emitted the system prompt edit for the current activation */
+  systemPromptEmitted: Schema.Boolean,
 }) {
   static initial = State.make({
     lastOffset: Offset.make("-1"),
@@ -106,6 +132,7 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
     processedBlockCount: 0,
     pendingEvaluation: [],
     inProgress: [],
+    systemPromptEmitted: false,
   });
 }
 
@@ -265,6 +292,18 @@ const reduce = (state: State, event: Event): State => {
     });
   }
 
+  // Track our own system prompt edit (for replay)
+  if (
+    SystemPromptEditEvent.is(event) &&
+    Option.isSome(event.payload.source) &&
+    event.payload.source.value === "codemode"
+  ) {
+    return State.make({
+      ...base,
+      systemPromptEmitted: true,
+    });
+  }
+
   return State.make(base);
 };
 
@@ -290,6 +329,20 @@ export const CodemodeProcessor: Processor<never> = {
           Effect.gen(function* () {
             const prevState = state;
             state = reduce(state, event);
+
+            // When LLM loop is activated, emit our system prompt edit
+            if (LlmLoopActivatedEvent.is(event) && !state.systemPromptEmitted) {
+              yield* Effect.log("emitting codemode system prompt");
+              yield* stream.append(
+                SystemPromptEditEvent.make({
+                  mode: "append",
+                  content: CODEMODE_SYSTEM_PROMPT,
+                  source: Option.some("codemode"),
+                }),
+              );
+              // Mark as emitted locally (reducer will also see our event on replay)
+              state = State.make({ ...state, systemPromptEmitted: true });
+            }
 
             // When an LLM request ends, parse for codemode blocks
             if (RequestEndedEvent.is(event)) {

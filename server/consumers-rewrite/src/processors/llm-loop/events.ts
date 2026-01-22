@@ -40,3 +40,24 @@ export const RequestCancelledEvent = EventSchema.make("iterate:llm-loop:request-
 export const RequestInterruptedEvent = EventSchema.make("iterate:llm-loop:request-interrupted", {
   requestOffset: Schema.NullOr(Offset),
 });
+
+// -------------------------------------------------------------------------------------
+// Activation Event
+// -------------------------------------------------------------------------------------
+
+/** Emitted when the LLM loop processor is activated (e.g., when a model is configured) */
+export const LlmLoopActivatedEvent = EventSchema.make("iterate:llm-loop:activated", {});
+
+// -------------------------------------------------------------------------------------
+// System Prompt Events
+// -------------------------------------------------------------------------------------
+
+/** Edit the system prompt used by the LLM loop */
+export const SystemPromptEditEvent = EventSchema.make("iterate:llm-loop:system-prompt-edit", {
+  /** How to apply the edit */
+  mode: Schema.Literal("append", "replace", "prepend"),
+  /** The content to add/replace */
+  content: Schema.String,
+  /** Optional source identifier for debugging */
+  source: Schema.optionalWith(Schema.String, { as: "Option" }),
+});
