@@ -6,7 +6,7 @@ import {
   RequestEndedEvent,
   RequestStartedEvent,
   ResponseSseEvent,
-} from "./processors/effect-ai/events.js";
+} from "./processors/llm-loop/events.js";
 
 describe("EventSchema", () => {
   // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ describe("EventSchema", () => {
         requestOffset: Offset.make("0000000000000001"),
       });
 
-      expect(event.type).toBe("iterate:effect-ai:response:sse");
+      expect(event.type).toBe("iterate:llm-loop:response:sse");
       expect(event.payload).toEqual({
         part: { type: "text-delta", delta: "Hi" },
         requestOffset: "0000000000000001",
@@ -45,7 +45,7 @@ describe("EventSchema", () => {
     it("allows omitting payload for empty schemas", () => {
       const event = RequestStartedEvent.make();
 
-      expect(event.type).toBe("iterate:effect-ai:request-started");
+      expect(event.type).toBe("iterate:llm-loop:request-started");
       expect(event.payload).toEqual({});
     });
   });

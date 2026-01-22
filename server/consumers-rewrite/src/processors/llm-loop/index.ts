@@ -1,7 +1,7 @@
 /**
- * Effect AI Processor
+ * LLM Loop Processor
  *
  * Uses @effect/ai LanguageModel to handle LLM generation.
  */
-export { EffectAiProcessor, EffectAiProcessorLayer } from "./processor.js";
+export { LlmLoopProcessor, LlmLoopProcessorLayer } from "./processor.js";
 export * from "./events.js";

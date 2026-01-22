@@ -12,7 +12,7 @@ import {
   RequestStartedEvent,
   ResponseSseEvent,
 } from "./events.js";
-import { EffectAiProcessor } from "./processor.js";
+import { LlmLoopProcessor } from "./processor.js";
 
 // -------------------------------------------------------------------------------------
 // Tests
@@ -25,7 +25,7 @@ it.scoped("triggers LLM on user message when enabled", () =>
 
     // Setup
     yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
-    yield* EffectAiProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
     // Send a user message
@@ -56,7 +56,7 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
 
     // Setup
     yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
-    yield* EffectAiProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
     // Send first user message

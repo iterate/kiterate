@@ -2,7 +2,7 @@
  * StreamManager test suite
  */
 import { describe, expect, it } from "@effect/vitest";
-import { Chunk, Effect, Layer, Stream } from "effect";
+import { Chunk, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 
 import { EventInput, EventType, Offset, StreamPath } from "../../domain.js";
 import * as StreamStorage from "../stream-storage/index.js";
@@ -125,6 +125,188 @@ describe("StreamManager", () => {
         "0000000000000003",
         "0000000000000004",
       ]);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("all paths subscription returns historical events", () =>
+    Effect.gen(function* () {
+      const manager = yield* StreamManager.StreamManager;
+      const pathA = StreamPath.make("test/all-history/a");
+      const pathB = StreamPath.make("test/all-history/b");
+
+      yield* manager.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
+      });
+      yield* manager.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 1 } }),
+      });
+      yield* manager.append({
+        path: pathB,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
+      });
+
+      const events = yield* manager.subscribe({}).pipe(Stream.runCollect);
+      const arr = Chunk.toReadonlyArray(events);
+
+      expect(arr).toHaveLength(3);
+
+      const eventsA = arr.filter((event) => event.path === pathA);
+      const eventsB = arr.filter((event) => event.path === pathB);
+
+      expect(eventsA.map((event) => event.offset)).toEqual([
+        "0000000000000000",
+        "0000000000000001",
+      ]);
+      expect(eventsB.map((event) => event.offset)).toEqual(["0000000000000000"]);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("all paths subscribe with after filters per path", () =>
+    Effect.gen(function* () {
+      const manager = yield* StreamManager.StreamManager;
+      const pathA = StreamPath.make("test/all-after/a");
+      const pathB = StreamPath.make("test/all-after/b");
+
+      yield* manager.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
+      });
+      yield* manager.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 1 } }),
+      });
+      yield* manager.append({
+        path: pathB,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
+      });
+
+      const events = yield* manager
+        .subscribe({ after: Offset.make("0000000000000000") })
+        .pipe(Stream.runCollect);
+
+      const arr = Chunk.toReadonlyArray(events);
+      const eventsA = arr.filter((event) => event.path === pathA);
+      const eventsB = arr.filter((event) => event.path === pathB);
+
+      expect(arr).toHaveLength(1);
+      expect(eventsA.map((event) => event.offset)).toEqual(["0000000000000001"]);
+      expect(eventsB).toHaveLength(0);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("all paths live subscription receives history then live events", () =>
+    Effect.gen(function* () {
+      const manager = yield* StreamManager.StreamManager;
+      const pathA = StreamPath.make("test/all-live/a");
+      const pathB = StreamPath.make("test/all-live/b");
+
+      yield* manager.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "history" } }),
+      });
+      yield* manager.append({
+        path: pathB,
+        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "history" } }),
+      });
+
+      const historyReady = yield* Deferred.make<void>();
+      const seenHistory = yield* Ref.make(0);
+      const historyCount = 2;
+
+      const subscriber = yield* manager.subscribe({ live: true }).pipe(
+        Stream.tap(() =>
+          Ref.updateAndGet(seenHistory, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === historyCount ? Deferred.succeed(historyReady, void 0) : Effect.void,
+            ),
+          ),
+        ),
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.fork,
+      );
+
+      yield* Deferred.await(historyReady);
+
+      yield* manager.append({
+        path: pathA,
+        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "live" } }),
+      });
+      yield* manager.append({
+        path: pathB,
+        event: EventInput.make({ type: EventType.make("test"), payload: { phase: "live" } }),
+      });
+
+      const events = yield* Fiber.join(subscriber);
+      const arr = Chunk.toReadonlyArray(events);
+
+      expect(arr).toHaveLength(4);
+
+      const phases = arr.map((event) => event.payload["phase"]);
+      expect(phases.slice(0, 2)).toEqual(["history", "history"]);
+      expect(phases.slice(2)).toEqual(["live", "live"]);
+
+      const eventsA = arr.filter((event) => event.path === pathA);
+      const eventsB = arr.filter((event) => event.path === pathB);
+
+      expect(eventsA.map((event) => event.offset)).toEqual([
+        "0000000000000000",
+        "0000000000000001",
+      ]);
+      expect(eventsB.map((event) => event.offset)).toEqual([
+        "0000000000000000",
+        "0000000000000001",
+      ]);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("live subscribe with after resumes without duplicates", () =>
+    Effect.gen(function* () {
+      const manager = yield* StreamManager.StreamManager;
+      const path = StreamPath.make("test/live-after");
+
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
+      });
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 1 } }),
+      });
+
+      const historyReady = yield* Deferred.make<void>();
+      const seenHistory = yield* Ref.make(0);
+      const historyCount = 1;
+
+      const subscriber = yield* manager
+        .subscribe({ path, after: Offset.make("0000000000000000"), live: true })
+        .pipe(
+          Stream.tap(() =>
+            Ref.updateAndGet(seenHistory, (count) => count + 1).pipe(
+              Effect.flatMap((count) =>
+                count === historyCount ? Deferred.succeed(historyReady, void 0) : Effect.void,
+              ),
+            ),
+          ),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.fork,
+        );
+
+      yield* Deferred.await(historyReady);
+
+      yield* manager.append({
+        path,
+        event: EventInput.make({ type: EventType.make("test"), payload: { idx: 2 } }),
+      });
+
+      const events = yield* Fiber.join(subscriber);
+      const arr = Chunk.toReadonlyArray(events);
+
+      expect(arr.map((event) => event.offset)).toEqual(["0000000000000001", "0000000000000002"]);
+      expect(arr.map((event) => event.payload)).toEqual([{ idx: 1 }, { idx: 2 }]);
     }).pipe(Effect.provide(testLayer)),
   );
 

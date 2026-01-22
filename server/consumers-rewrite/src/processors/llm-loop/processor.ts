@@ -1,5 +1,5 @@
 /**
- * Effect AI Processor
+ * LLM Loop Processor
  *
  * Uses @effect/ai LanguageModel to trigger LLM generation when:
  * - The path is configured for "openai" model
@@ -25,7 +25,7 @@ import {
 // State
 // -------------------------------------------------------------------------------------
 
-class State extends Schema.Class<State>("EffectAiProcessor/State")({
+class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   enabled: Schema.Boolean,
   lastOffset: Offset,
   history: Schema.Array(Schema.encodedSchema(Prompt.Message)),
@@ -109,8 +109,8 @@ const reduce = (state: State, event: Event): State => {
 // Processor
 // -------------------------------------------------------------------------------------
 
-export const EffectAiProcessor: Processor<LanguageModel.LanguageModel> = {
-  name: "effect-ai",
+export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
+  name: "llm-loop",
 
   run: (stream) =>
     Effect.gen(function* () {
@@ -189,4 +189,4 @@ export const EffectAiProcessor: Processor<LanguageModel.LanguageModel> = {
 // Layer
 // -------------------------------------------------------------------------------------
 
-export const EffectAiProcessorLayer = toLayer(EffectAiProcessor);
+export const LlmLoopProcessorLayer = toLayer(LlmLoopProcessor);
