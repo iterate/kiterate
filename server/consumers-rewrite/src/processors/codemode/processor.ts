@@ -405,7 +405,15 @@ export const CodemodeProcessor: Processor<never> = {
                   undefined,
                   result.logs,
                 );
-                yield* stream.append(UserMessageEvent.make({ content: summary }));
+                yield* stream.append(
+                  UserMessageEvent.make({
+                    content: dedent`
+                    <developer-message>
+                      ${summary}
+                    </developer-message>
+                  `,
+                  }),
+                );
               } else {
                 yield* stream.append(
                   CodeEvalFailedEvent.make({

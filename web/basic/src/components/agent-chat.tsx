@@ -400,7 +400,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
         {noModelSelected && (
           <div className="flex items-center gap-2 p-3 text-sm text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md">
             <AlertCircleIcon className="size-4 shrink-0" />
-            <span>Select an AI model above to start chatting</span>
+            <span>Select an AI model below to start chatting</span>
           </div>
         )}
 
@@ -435,20 +435,26 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
                 </TabsTrigger>
               </TabsList>
             </Tabs>
-            <Select
-              value={aiModel ?? ""}
-              onValueChange={(v) => handleModelChange(v as AiModelType)}
-            >
-              <SelectTrigger
-                className={`h-8 w-[130px] text-xs ${noModelSelected ? "border-amber-500 animate-pulse" : ""}`}
+            <div className={`flex ${noModelSelected ? "animate-pulse" : ""}`}>
+              <Button
+                variant={aiModel === "openai" ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs rounded-r-none"
+                disabled={aiModel === "openai"}
+                onClick={() => handleModelChange("openai")}
               >
-                <SelectValue placeholder="Select model..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="openai">OpenAI</SelectItem>
-                <SelectItem value="grok">Grok</SelectItem>
-              </SelectContent>
-            </Select>
+                OpenAI
+              </Button>
+              <Button
+                variant={aiModel === "grok" ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs rounded-l-none border-l-0"
+                disabled={aiModel === "grok"}
+                onClick={() => handleModelChange("grok")}
+              >
+                Grok
+              </Button>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {isStreaming && (
