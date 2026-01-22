@@ -14,26 +14,25 @@ Effect-native event streaming infrastructure with AI integration.
                                 v
                          StreamManager
   +----------------------------------------------------------+
-  |  agentLayer (decorator)                                  |
-  |    - Intercepts append() for config/prompt events        |
-  |    - Triggers AI generation on user messages             |
-  |    - Streams AI responses back as events                 |
-  |                         |                                |
-  |                         v                                |
   |  liveLayer (core)                                        |
   |    - Manages per-path EventStream instances              |
+  |    - PubSub for live subscriptions                       |
   +----------------------------------------------------------+
-                  |                       |
-                  v                       v
-        StreamStorage                 AiClient
-  +---------------------+    +---------------------------+
-  |  fileSystemLayer    |    |  OpenAI (LanguageModel)   |
-  |    .data/streams/   |    |    gpt-4o via @effect/ai  |
-  |    *.yaml files     |    +---------------------------+
-  +---------------------+    |  Grok (GrokVoiceClient)   |
-  |  inMemoryLayer      |    |    WebSocket to api.x.ai  |
-  |    (for testing)    |    |    Audio + text support   |
-  +---------------------+    +---------------------------+
+           |                    |                    |
+           v                    v                    v
+    StreamStorage         LlmLoopProcessor    CodemodeProcessor
+  +----------------+    +------------------+  +------------------+
+  | fileSystemLayer|    | Triggers LLM on  |  | Evaluates JS     |
+  |  .data/streams/|    | user messages,   |  | code blocks from |
+  |  *.yaml files  |    | streams responses|  | assistant msgs   |
+  +----------------+    +------------------+  +------------------+
+  | inMemoryLayer  |           |
+  |  (for testing) |           v
+  +----------------+    LanguageModel (OpenAI)
+                        +------------------+
+                        | gpt-4o via       |
+                        | @effect/ai       |
+                        +------------------+
 
                           EventStream
   +----------------------------------------------------------+
@@ -46,16 +45,15 @@ Effect-native event streaming infrastructure with AI integration.
 
 ```
 ServerLive(port)
- └─ AppLive
-     └─ StreamManager.agentLayer
-         ├─ StreamManager.liveLayer
-         │   └─ StreamStorage.fileSystemLayer
-         │       └─ NodeContext.layer
-         └─ AiClient.layer
-             ├─ LanguageModel (OpenAI)
-             │   └─ OpenAiClient.layer
-             └─ GrokVoiceClient.Default
-                 └─ GrokVoiceConfig.defaultLayer
+ └─ StreamManagerLive
+     ├─ ProcessorsLive (merged on top)
+     │   ├─ LlmLoopProcessorLayer
+     │   │   └─ LanguageModel (OpenAI)
+     │   │       └─ OpenAiClient.layer
+     │   └─ CodemodeProcessorLayer
+     └─ StreamManager.liveLayer
+         └─ StreamStorage.fileSystemLayer
+             └─ NodeContext.layer
 ```
 
 ## Data Flow
@@ -69,21 +67,15 @@ Client POST
 appendHandler
     |
     v
-agentLayer.append()
-    |
-    +-- config event? -----> update model selection
-    |                              |
-    +-- prompt event? -----> AiClient.prompt()
-    |                              |
-    |                        stream responses
-    |                              |
-    +-- other event                |
-    |                              |
-    v                              v
-inner.append() <------------------+
+StreamManager.append()
     |
     v
 Storage.append() + PubSub.publish()
+    |
+    +---> Processors receive event via subscribe()
+          |
+          +-- LlmLoopProcessor: user message? → LLM request → emit responses
+          +-- CodemodeProcessor: code block? → evaluate → emit results
 ```
 
 ### Subscribe (GET)
@@ -133,12 +125,33 @@ Storage.read()     PubSub.subscribe()
 | Event Type                                      | Trigger                                                 |
 | ----------------------------------------------- | ------------------------------------------------------- |
 | `iterate:agent:config:set`                      | Switch AI model (`payload.model: "openai" \| "grok"`)   |
-| `iterate:agent:action:send-user-message:called` | User message, triggers AI                               |
+| `iterate:agent:action:send-user-message:called` | User message, triggers LLM                              |
 | `iterate:llm-loop:request-started`              | LLM request initiated                                   |
 | `iterate:llm-loop:response:sse`                 | LLM streaming response chunk (text-delta, finish, etc.) |
 | `iterate:llm-loop:request-ended`                | LLM request completed successfully                      |
 | `iterate:llm-loop:request-cancelled`            | LLM request failed or interrupted                       |
-| `iterate:grok:response:sse`                     | Grok streaming response event                           |
+| `iterate:codemode:*`                            | Codemode processor events                               |
+
+## Processor Pattern
+
+Processors are background workers that react to events on a per-path basis:
+
+```typescript
+// Define a processor
+export const MyProcessor: Processor<LanguageModel> = {
+  name: "MyProcessor",
+  run: (stream) =>
+    Effect.gen(function* () {
+      // stream.path - the path this processor is scoped to
+      // stream.subscribe() - live events
+      // stream.read() - historical events
+      // stream.append() - emit new events
+    }),
+};
+
+// Convert to a Layer (spawns one processor per active path)
+export const MyProcessorLayer = toLayer(MyProcessor);
+```
 
 ## Storage Format
 

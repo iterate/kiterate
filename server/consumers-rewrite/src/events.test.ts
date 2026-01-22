@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { EventInput, EventType, Offset, Payload } from "./domain.js";
 import { ConfigSetEvent, EventSchema, UserMessageEvent } from "./events.js";
@@ -221,6 +221,37 @@ describe("EventSchema", () => {
       });
 
       expect(CustomEvent.is(event)).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Type alias pattern
+  // ---------------------------------------------------------------------------
+
+  describe("Type alias", () => {
+    // Pattern: value + type alias using .Type
+    const TestEvent = EventSchema.make("test:typed:event", {
+      message: Schema.String,
+      count: Schema.Number,
+    });
+    type TestEvent = typeof TestEvent.Type;
+
+    it("provides named type via .Type phantom", () => {
+      const event = TestEvent.make({ message: "hello", count: 42 });
+
+      // Can use the type alias for annotations
+      const annotated: TestEvent = event;
+
+      expect(annotated.type).toBe("test:typed:event");
+      expect(annotated.payload).toEqual({ message: "hello", count: 42 });
+    });
+
+    it("type alias works with function signatures", () => {
+      // The type alias can be used in function signatures
+      const processEvent = (e: TestEvent): string => e.payload.message;
+
+      const event = TestEvent.make({ message: "typed", count: 0 });
+      expect(processEvent(event)).toBe("typed");
     });
   });
 });
