@@ -3,6 +3,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
+import { CodemodeProcessorLayer } from "./processors/codemode/index.js";
 import { LlmLoopProcessorLayer } from "./processors/llm-loop/index.js";
 import { ServerLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
@@ -25,7 +26,7 @@ const LanguageModelLive = OpenAiLanguageModel.layer({ model: "gpt-4o" }).pipe(
 );
 
 // Processors (background processes that run with the server)
-const ProcessorsLive = Layer.mergeAll(LlmLoopProcessorLayer);
+const ProcessorsLive = Layer.mergeAll(LlmLoopProcessorLayer, CodemodeProcessorLayer);
 
 // StreamManager with processors on top
 const StreamManagerLive = ProcessorsLive.pipe(
