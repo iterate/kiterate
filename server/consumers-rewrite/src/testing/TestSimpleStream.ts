@@ -1,7 +1,7 @@
 /**
- * TestSimpleStream - a mock ProcessorStream for testing
+ * TestSimpleStream - a mock EventStream for testing
  *
- * Extends ProcessorStream with test control methods for inspecting events,
+ * Extends EventStream with test control methods for inspecting events,
  * waiting for subscription, and waiting for specific event types.
  *
  * The wait methods consume events - each call returns the *next* matching event,
@@ -10,7 +10,7 @@
 import { DateTime, Deferred, Duration, Effect, Queue, Scope, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
-import { ProcessorStream } from "../processors/processor.js";
+import { EventStream } from "../services/stream-manager/index.js";
 
 /** Default timeout for wait operations */
 const DEFAULT_TIMEOUT = Duration.millis(300);
@@ -36,9 +36,7 @@ interface WaitOptions {
   readonly timeout?: Duration.DurationInput;
 }
 
-export interface TestSimpleStream extends ProcessorStream {
-  /** Append an event and return the full Event (not just offset) */
-  readonly appendEvent: (event: EventInput) => Effect.Effect<Event>;
+export interface TestSimpleStream extends EventStream.EventStream {
   /** Get all events that have been appended */
   readonly getEvents: () => Effect.Effect<readonly Event[]>;
   /** Wait until subscribe has been called */
@@ -173,9 +171,7 @@ export const makeTestSimpleStream = (
       );
 
     return {
-      path,
-
-      // ProcessorStream interface
+      // EventStream interface
       read: (options?: { from?: Offset; to?: Offset }) => {
         const snapshot = [...events];
         return Stream.fromIterable(snapshot).pipe(
@@ -197,10 +193,9 @@ export const makeTestSimpleStream = (
           );
         }).pipe(Stream.unwrap),
 
-      append: (input: EventInput) => appendImpl(input).pipe(Effect.map((e) => e.offset)),
+      append: appendImpl,
 
       // Test control methods
-      appendEvent: appendImpl,
       getEvents: () => Effect.sync(() => events),
 
       waitForSubscribe: (options) => withTimeout(Deferred.await(subscribed), options),

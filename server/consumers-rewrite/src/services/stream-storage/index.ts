@@ -3,8 +3,9 @@
  */
 
 // Re-export service definition
-export { StreamStorage, StreamStorageError, StreamStorageTypeId } from "./service.js";
-export type { StreamStorageTypeId as StreamStorageTypeIdType } from "./service.js";
+export type { StreamStorage } from "./service.js";
+export { StreamStorageManager, StreamStorageError, StreamStorageManagerTypeId } from "./service.js";
+export type { StreamStorageManagerTypeId as StreamStorageManagerTypeIdType } from "./service.js";
 
 // Re-export layers
 export { inMemoryLayer } from "./inMemory.js";

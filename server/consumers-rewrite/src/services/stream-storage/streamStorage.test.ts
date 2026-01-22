@@ -14,12 +14,12 @@ import * as StreamStorage from "./index.js";
  */
 const streamStorageTests = <E>(
   name: string,
-  makeLayer: () => Layer.Layer<StreamStorage.StreamStorage, E>,
+  makeLayer: () => Layer.Layer<StreamStorage.StreamStorageManager, E>,
 ) => {
   describe(name, () => {
     it.effect("append returns event with offset", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const path = StreamPath.make("test/append");
 
         const event = yield* storage.append({
@@ -34,7 +34,7 @@ const streamStorageTests = <E>(
 
     it.effect("append increments offset", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const path = StreamPath.make("test/increment");
 
         const e1 = yield* storage.append({
@@ -58,7 +58,7 @@ const streamStorageTests = <E>(
 
     it.effect("listPaths returns empty when no streams", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
 
         const paths = yield* storage.listPaths();
 
@@ -68,7 +68,7 @@ const streamStorageTests = <E>(
 
     it.effect("listPaths returns unique paths", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const pathA = StreamPath.make("test/list/a");
         const pathB = StreamPath.make("test/list/b");
 
@@ -95,7 +95,7 @@ const streamStorageTests = <E>(
 
     it.effect("read returns all stored events", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const path = StreamPath.make("test/read");
 
         yield* storage.append({
@@ -121,7 +121,7 @@ const streamStorageTests = <E>(
 
     it.effect("read with from filters events (exclusive - returns events after from)", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const path = StreamPath.make("test/filter");
 
         yield* storage.append({
@@ -139,7 +139,7 @@ const streamStorageTests = <E>(
 
         // from="0000000000000001" means "I've seen offset 1, give me what's after"
         const events = yield* storage
-          .read({ path, after: Offset.make("0000000000000001") })
+          .read({ path, from: Offset.make("0000000000000001") })
           .pipe(Stream.runCollect);
         const arr = Chunk.toReadonlyArray(events);
 
@@ -152,7 +152,7 @@ const streamStorageTests = <E>(
 
     it.effect("read after beyond last offset returns empty", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const path = StreamPath.make("test/after-last");
 
         yield* storage.append({
@@ -165,7 +165,7 @@ const streamStorageTests = <E>(
         });
 
         const events = yield* storage
-          .read({ path, after: Offset.make("0000000000000009") })
+          .read({ path, from: Offset.make("0000000000000009") })
           .pipe(Stream.runCollect);
 
         expect(Chunk.toReadonlyArray(events)).toEqual([]);
@@ -174,7 +174,7 @@ const streamStorageTests = <E>(
 
     it.effect("read from empty stream returns empty", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const path = StreamPath.make("test/empty");
 
         const events = yield* storage.read({ path }).pipe(Stream.runCollect);
@@ -185,7 +185,7 @@ const streamStorageTests = <E>(
 
     it.effect("different paths are independent", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const pathA = StreamPath.make("test/a");
         const pathB = StreamPath.make("test/b");
 
@@ -208,7 +208,7 @@ const streamStorageTests = <E>(
 
     it.effect("offsets are independent per path", () =>
       Effect.gen(function* () {
-        const storage = yield* StreamStorage.StreamStorage;
+        const storage = yield* StreamStorage.StreamStorageManager;
         const pathA = StreamPath.make("test/offset-a");
         const pathB = StreamPath.make("test/offset-b");
 

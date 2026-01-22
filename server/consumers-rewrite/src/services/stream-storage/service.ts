@@ -9,8 +9,8 @@ import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 // Type ID (for nominal uniqueness)
 // -------------------------------------------------------------------------------------
 
-export const StreamStorageTypeId: unique symbol = Symbol.for("@app/StreamStorage");
-export type StreamStorageTypeId = typeof StreamStorageTypeId;
+export const StreamStorageManagerTypeId: unique symbol = Symbol.for("@app/StreamStorageManager");
+export type StreamStorageManagerTypeId = typeof StreamStorageManagerTypeId;
 
 // -------------------------------------------------------------------------------------
 // Errors
@@ -24,27 +24,54 @@ export class StreamStorageError extends Schema.TaggedError<StreamStorageError>()
 ) {}
 
 // -------------------------------------------------------------------------------------
-// StreamStorage interface + tag
+// StreamStorage (path-scoped data type)
 // -------------------------------------------------------------------------------------
 
+/**
+ * A path-scoped storage interface - the path is already applied.
+ */
 export interface StreamStorage {
-  readonly [StreamStorageTypeId]: StreamStorageTypeId;
+  /** Read events from this stream */
+  readonly read: (options?: { from?: Offset; to?: Offset }) => Stream.Stream<Event>;
+
+  /** Append an event to this stream, returns the stored event with assigned offset */
+  readonly append: (event: EventInput) => Effect.Effect<Event>;
+}
+
+// -------------------------------------------------------------------------------------
+// StreamStorageManager (service with path in calls)
+// -------------------------------------------------------------------------------------
+
+/**
+ * Storage manager service - manages storage across all paths.
+ */
+export interface StreamStorageManager {
+  readonly [StreamStorageManagerTypeId]: StreamStorageManagerTypeId;
+
   /** List all existing stream paths */
   readonly listPaths: () => Effect.Effect<StreamPath[], StreamStorageError>;
+
+  /** Get a path-scoped StreamStorage */
+  readonly forPath: (path: StreamPath) => StreamStorage;
+
+  /**
+   * Read events from stream.
+   * @param from - Exclusive start offset. Returns events with offset > from.
+   * @param to - Inclusive end offset. Returns events with offset <= to.
+   */
+  readonly read: (input: {
+    path: StreamPath;
+    from?: Offset;
+    to?: Offset;
+  }) => Stream.Stream<Event, StreamStorageError>;
+
   /** Append event input to stream, assign offset + createdAt, store, and return the event */
   readonly append: (input: {
     path: StreamPath;
     event: EventInput;
   }) => Effect.Effect<Event, StreamStorageError>;
-  /**
-   * Read events from stream.
-   * @param after - Last seen offset (exclusive). Returns events with offset > after.
-   *                Pass the last offset you processed to resume without duplicates.
-   */
-  readonly read: (input: {
-    path: StreamPath;
-    after?: Offset;
-  }) => Stream.Stream<Event, StreamStorageError>;
 }
 
-export const StreamStorage = Context.GenericTag<StreamStorage>("@app/StreamStorage");
+export const StreamStorageManager = Context.GenericTag<StreamStorageManager>(
+  "@app/StreamStorageManager",
+);

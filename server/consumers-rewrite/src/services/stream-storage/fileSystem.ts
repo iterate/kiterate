@@ -1,5 +1,5 @@
 /**
- * File-system implementation of StreamStorage
+ * File-system implementation of StreamStorageManager
  *
  * Stores events as YAML documents separated by `---`.
  * Each stream path maps to a file: {basePath}/{streamPath}.yaml
@@ -10,13 +10,18 @@ import { DateTime, Effect, Layer, Schema, Stream } from "effect";
 import * as YAML from "yaml";
 
 import { Event, EventInput, Offset, StreamPath, Version } from "../../domain.js";
-import { StreamStorage, StreamStorageError, StreamStorageTypeId } from "./service.js";
+import {
+  StreamStorage,
+  StreamStorageError,
+  StreamStorageManager,
+  StreamStorageManagerTypeId,
+} from "./service.js";
 
 export const fileSystemLayer = (
   basePath: string,
-): Layer.Layer<StreamStorage, StreamStorageError, Fs.FileSystem | Path.Path> =>
+): Layer.Layer<StreamStorageManager, StreamStorageError, Fs.FileSystem | Path.Path> =>
   Layer.effect(
-    StreamStorage,
+    StreamStorageManager,
     Effect.gen(function* () {
       const fs = yield* Fs.FileSystem;
       const path = yield* Path.Path;
@@ -44,9 +49,82 @@ export const fileSystemLayer = (
 
       const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
 
-      return StreamStorage.of({
-        [StreamStorageTypeId]: StreamStorageTypeId,
+      const append = ({
+        path: streamPath,
+        event: input,
+      }: {
+        path: StreamPath;
+        event: EventInput;
+      }) =>
+        Effect.gen(function* () {
+          const filePath = getFilePath(streamPath);
 
+          // Get and increment offset
+          const nextOffset = yield* readOffsetFile(streamPath);
+          const offset = formatOffset(nextOffset);
+          const createdAt = yield* DateTime.now;
+          const version = input.version ?? Version.make("1");
+          const event = Event.make({ ...input, path: streamPath, offset, createdAt, version });
+
+          // Encode Event to YAML document
+          const encoded = yield* Schema.encode(Event)(event);
+          const yaml = YAML.stringify(encoded);
+          const doc = "---\n" + yaml;
+          yield* fs.writeFile(filePath, new TextEncoder().encode(doc), { flag: "a" });
+
+          // Update offset file
+          yield* writeOffsetFile(streamPath, nextOffset + 1);
+
+          return event;
+        }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause })));
+
+      const read = ({
+        path: streamPath,
+        from,
+        to,
+      }: {
+        path: StreamPath;
+        from?: Offset;
+        to?: Offset;
+      }) =>
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const filePath = getFilePath(streamPath);
+            const exists = yield* fs.exists(filePath);
+
+            if (!exists) {
+              return Stream.empty;
+            }
+
+            const content = yield* fs.readFileString(filePath);
+            const docs = YAML.parseAllDocuments(content).map((doc) => doc.toJS());
+
+            // Decode YAML objects to Events
+            let events = yield* Effect.all(docs.map((doc) => Schema.decodeUnknown(Event)(doc)));
+
+            if (from !== undefined) {
+              events = events.filter((e) => e.offset > from);
+            }
+            if (to !== undefined) {
+              events = events.filter((e) => e.offset <= to);
+            }
+
+            return Stream.fromIterable(events);
+          }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
+        );
+
+      const forPath = (streamPath: StreamPath): StreamStorage => ({
+        read: (options) =>
+          read({
+            path: streamPath,
+            ...(options?.from !== undefined && { from: options.from }),
+            ...(options?.to !== undefined && { to: options.to }),
+          }).pipe(Stream.catchAllCause(() => Stream.empty)),
+        append: (event) => append({ path: streamPath, event }).pipe(Effect.orDie),
+      });
+
+      return StreamStorageManager.of({
+        [StreamStorageManagerTypeId]: StreamStorageManagerTypeId,
         listPaths: () =>
           Effect.gen(function* () {
             const entries = yield* fs.readDirectory(basePath);
@@ -60,53 +138,9 @@ export const fileSystemLayer = (
             }
             return paths;
           }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
-
-        append: ({ path: streamPath, event: input }: { path: StreamPath; event: EventInput }) =>
-          Effect.gen(function* () {
-            const filePath = getFilePath(streamPath);
-
-            // Get and increment offset
-            const nextOffset = yield* readOffsetFile(streamPath);
-            const offset = formatOffset(nextOffset);
-            const createdAt = yield* DateTime.now;
-            const version = input.version ?? Version.make("1");
-            const event = Event.make({ ...input, path: streamPath, offset, createdAt, version });
-
-            // Encode Event to YAML document
-            const encoded = yield* Schema.encode(Event)(event);
-            const yaml = YAML.stringify(encoded);
-            const doc = "---\n" + yaml;
-            yield* fs.writeFile(filePath, new TextEncoder().encode(doc), { flag: "a" });
-
-            // Update offset file
-            yield* writeOffsetFile(streamPath, nextOffset + 1);
-
-            return event;
-          }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
-
-        read: ({ path: streamPath, after }: { path: StreamPath; after?: Offset }) =>
-          Stream.unwrap(
-            Effect.gen(function* () {
-              const filePath = getFilePath(streamPath);
-              const exists = yield* fs.exists(filePath);
-
-              if (!exists) {
-                return Stream.empty;
-              }
-
-              const content = yield* fs.readFileString(filePath);
-              const docs = YAML.parseAllDocuments(content).map((doc) => doc.toJS());
-
-              // Decode YAML objects to Events
-              const events = yield* Effect.all(docs.map((doc) => Schema.decodeUnknown(Event)(doc)));
-
-              // after = last seen offset, so return events AFTER it (exclusive)
-              const filtered =
-                after !== undefined ? events.filter((e) => e.offset > after) : events;
-
-              return Stream.fromIterable(filtered);
-            }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
-          ),
+        forPath,
+        append,
+        read,
       });
     }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause }))),
   );

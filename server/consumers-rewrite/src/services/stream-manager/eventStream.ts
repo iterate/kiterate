@@ -3,66 +3,54 @@
  */
 import { Effect, PubSub, Ref, Stream } from "effect";
 
-import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
-import { StreamStorage, StreamStorageError } from "../stream-storage/service.js";
+import { Event, EventInput, Offset } from "../../domain.js";
+import { StreamStorage } from "../stream-storage/service.js";
 
 // -------------------------------------------------------------------------------------
 // EventStream interface
 // -------------------------------------------------------------------------------------
 
 export interface EventStream {
-  readonly append: (input: { event: EventInput }) => Effect.Effect<Event, StreamStorageError>;
-  /**
-   * Subscribe to events on this stream.
-   * @param after - Last seen offset (exclusive). Returns events with offset > after.
-   * @param live - If true, continues with live events after history. Default: false (history only).
-   */
-  readonly subscribe: (options?: {
-    after?: Offset;
-    live?: boolean;
-  }) => Stream.Stream<Event, StreamStorageError>;
+  /** Subscribe to live events on this path, optionally starting after an offset */
+  readonly subscribe: (options?: { from?: Offset }) => Stream.Stream<Event>;
+
+  /** Read historical events on this path, optionally within a range */
+  readonly read: (options?: { from?: Offset; to?: Offset }) => Stream.Stream<Event>;
+
+  /** Append an event to this path, returns the stored event with assigned offset */
+  readonly append: (event: EventInput) => Effect.Effect<Event>;
 }
 
 // -------------------------------------------------------------------------------------
 // EventStream implementation
 // -------------------------------------------------------------------------------------
 
-export const make = (input: {
-  storage: StreamStorage;
-  path: StreamPath;
-}): Effect.Effect<EventStream> =>
+/**
+ * Create an EventStream from a path-scoped StreamStorage.
+ * Wraps storage with PubSub for live event subscriptions.
+ */
+export const make = (storage: StreamStorage): Effect.Effect<EventStream> =>
   Effect.gen(function* () {
-    const { storage, path } = input;
     const pubsub = yield* PubSub.unbounded<Event>();
 
-    const append = Effect.fn("EventStream.append")(function* ({
-      event: eventInput,
-    }: {
-      event: EventInput;
-    }) {
-      const event = yield* storage.append({ path, event: eventInput });
-      yield* PubSub.publish(pubsub, event);
-      return event;
-    });
+    const append = (eventInput: EventInput) =>
+      Effect.gen(function* () {
+        const event = yield* storage.append(eventInput);
+        yield* PubSub.publish(pubsub, event);
+        return event;
+      });
 
-    const subscribe = (options?: { after?: Offset; live?: boolean }) =>
+    const subscribe = (options?: { from?: Offset }) =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
-          const after = options?.after ?? Offset.make("-1");
-          const live = options?.live ?? false;
+          const from = options?.from ?? Offset.make("-1");
 
-          if (!live) {
-            // Historical only - no PubSub subscription
-            return storage.read({ path, after });
-          }
-
-          // Live mode: history + live with deduplication
           // Subscribe to PubSub first (don't miss events during history replay)
           const queue = yield* PubSub.subscribe(pubsub);
           const liveStream = Stream.fromQueue(queue);
 
-          const historicalStream = storage.read({ path, after });
-          const lastOffsetRef = yield* Ref.make<Offset>(after);
+          const historicalStream = storage.read({ from });
+          const lastOffsetRef = yield* Ref.make<Offset>(from);
 
           // Track last historical offset, then filter live to only new events
           const trackedHistorical = historicalStream.pipe(
@@ -84,7 +72,10 @@ export const make = (input: {
 
           return Stream.concat(trackedHistorical, dedupedLive);
         }),
-      );
+      ).pipe(Stream.catchAllCause(() => Stream.empty));
 
-    return { append, subscribe };
+    const read = (options?: { from?: Offset; to?: Offset }) =>
+      storage.read(options).pipe(Stream.catchAllCause(() => Stream.empty));
+
+    return { append, subscribe, read };
   });

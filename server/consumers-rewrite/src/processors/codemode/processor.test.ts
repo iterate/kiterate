@@ -48,17 +48,17 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     // For this test, we'll manually append the LLM response events
 
     // Append request started
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
     // Emit SSE events with a codemode block
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({ id: "msg1", delta: "Here's some code:\n" }),
         requestOffset,
       }),
     );
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -69,7 +69,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     );
 
     // End the request - this triggers codemode parsing
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for codemode events
     const added = yield* stream.waitForEvent(CodeBlockAddedEvent);
@@ -96,10 +96,10 @@ it.scoped("captures console.log calls", () =>
     yield* stream.waitForSubscribe();
 
     // Append request started and SSE with logging code
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -115,7 +115,7 @@ async function codemode() {
       }),
     );
 
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for completion
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
@@ -135,10 +135,10 @@ it.scoped("handles evaluation errors", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -152,7 +152,7 @@ async function codemode() {
       }),
     );
 
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for failure
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
@@ -169,10 +169,10 @@ it.scoped("handles missing codemode function", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -184,7 +184,7 @@ const x = 42;
       }),
     );
 
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
@@ -200,10 +200,10 @@ it.scoped("handles multiple codemode blocks", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -225,7 +225,7 @@ async function codemode() {
       }),
     );
 
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for both code blocks
     const added1 = yield* stream.waitForEvent(CodeBlockAddedEvent);
@@ -252,10 +252,10 @@ it.scoped("handles non-serializable return values", () =>
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make());
     const requestOffset = requestStarted.offset;
 
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -271,7 +271,7 @@ async function codemode() {
       }),
     );
 
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);

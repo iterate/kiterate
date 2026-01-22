@@ -2,41 +2,23 @@
  * Processor Abstraction
  *
  * A minimal interface for building path-scoped processors. Each processor's `run`
- * is called once per path, with a path-scoped ProcessorStream.
+ * is called once per path, with a path-scoped EventStream.
  */
 import { Effect, Layer, Scope, Stream } from "effect";
 
-import { Event, EventInput, Offset, StreamPath } from "../domain.js";
-import { StreamManager } from "../services/stream-manager/index.js";
-
-// -------------------------------------------------------------------------------------
-// ProcessorStream
-// -------------------------------------------------------------------------------------
-
-/**
- * A path-scoped stream interface for processors.
- */
-export interface ProcessorStream {
-  /** Subscribe to live events on this path, optionally starting after an offset */
-  readonly subscribe: (options?: { from?: Offset }) => Stream.Stream<Event>;
-
-  /** Read historical events on this path, optionally within a range */
-  readonly read: (options?: { from?: Offset; to?: Offset }) => Stream.Stream<Event>;
-
-  /** Append an event to this path, returns the assigned offset */
-  readonly append: (event: EventInput) => Effect.Effect<Offset>;
-}
+import { StreamPath } from "../domain.js";
+import { EventStream, StreamManager } from "../services/stream-manager/index.js";
 
 // -------------------------------------------------------------------------------------
 // Processor
 // -------------------------------------------------------------------------------------
 
 /**
- * A processor - a function that runs per-path with a path-scoped ProcessorStream.
+ * A processor - a function that runs per-path with a path-scoped EventStream.
  */
 export interface Processor<R> {
   readonly name: string;
-  readonly run: (stream: ProcessorStream) => Effect.Effect<void, never, R | Scope.Scope>;
+  readonly run: (stream: EventStream.EventStream) => Effect.Effect<void, never, R | Scope.Scope>;
 }
 
 // -------------------------------------------------------------------------------------
@@ -59,36 +41,21 @@ export const toLayer = <R>(
       // Track which paths we've started processors for
       const activePaths = new Set<StreamPath>();
 
-      const makeStream = (path: StreamPath): ProcessorStream => ({
+      const makeStream = (path: StreamPath): EventStream.EventStream => ({
         subscribe: (options) =>
-          streamManager
-            .subscribe({
-              path,
-              live: true,
-              ...(options?.from !== undefined && { after: options.from }),
-            })
-            .pipe(Stream.catchAllCause(() => Stream.empty)),
+          streamManager.subscribe({
+            path,
+            ...(options?.from !== undefined && { from: options.from }),
+          }),
 
         read: (options) =>
-          streamManager
-            .subscribe({
-              path,
-              live: false,
-              ...(options?.from !== undefined && { after: options.from }),
-              // Note: 'to' not currently supported by StreamManager
-            })
-            .pipe(Stream.catchAllCause(() => Stream.empty)),
+          streamManager.read({
+            path,
+            ...(options?.from !== undefined && { from: options.from }),
+            ...(options?.to !== undefined && { to: options.to }),
+          }),
 
-        append: (event) =>
-          streamManager.append({ path, event }).pipe(
-            Effect.map((e) => e.offset),
-            Effect.catchAllCause((cause) =>
-              Effect.gen(function* () {
-                yield* Effect.logError("append failed", cause);
-                return Offset.make("-1"); // fallback offset on error
-              }),
-            ),
-          ),
+        append: (event) => streamManager.append({ path, event }),
       });
 
       const startProcessor = (path: StreamPath) =>
@@ -109,7 +76,7 @@ export const toLayer = <R>(
       yield* Effect.log("starting");
 
       // Discover existing paths and start processors
-      yield* streamManager.subscribe({ live: false }).pipe(
+      yield* streamManager.read({}).pipe(
         Stream.runForEach((event) => startProcessor(event.path)),
         Effect.catchAllCause((cause) => Effect.logError("discovery failed", cause)),
       );
@@ -117,7 +84,7 @@ export const toLayer = <R>(
       yield* Effect.log(`discovered ${activePaths.size} paths`);
 
       // Watch for new paths
-      yield* streamManager.subscribe({ live: true }).pipe(
+      yield* streamManager.subscribe({}).pipe(
         Stream.runForEach((event) => startProcessor(event.path)),
         Effect.catchAllCause((cause) => Effect.logError("watch failed", cause)),
         Effect.forkScoped,

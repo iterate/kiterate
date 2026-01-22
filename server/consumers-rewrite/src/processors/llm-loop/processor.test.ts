@@ -25,12 +25,12 @@ describe("LlmLoopProcessor", () => {
       const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Send a user message
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Hello!" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
       yield* lm.waitForCall();
@@ -58,12 +58,12 @@ describe("LlmLoopProcessor", () => {
       const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Send first user message
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "First message" }));
+      yield* stream.append(UserMessageEvent.make({ content: "First message" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
       yield* lm.waitForCall();
@@ -82,9 +82,7 @@ describe("LlmLoopProcessor", () => {
       expect(sse2.payload.requestOffset).toBe(firstRequest.offset);
 
       // Send second user message - this triggers interruption
-      yield* stream.appendEvent(
-        UserMessageEvent.make({ content: "Second message (interrupts first)" }),
-      );
+      yield* stream.append(UserMessageEvent.make({ content: "Second message (interrupts first)" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
 
@@ -121,14 +119,14 @@ describe("LlmLoopProcessor", () => {
       const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Rapid user messages
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "One" }));
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Two" }));
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Three" }));
+      yield* stream.append(UserMessageEvent.make({ content: "One" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Two" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Three" }));
       yield* Effect.yieldNow();
 
       const before = yield* stream.getEvents();
@@ -154,13 +152,13 @@ describe("LlmLoopProcessor", () => {
       const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       const interval = Duration.millis(150);
       for (let i = 0; i < 13; i++) {
-        yield* stream.appendEvent(UserMessageEvent.make({ content: `Message ${i}` }));
+        yield* stream.append(UserMessageEvent.make({ content: `Message ${i}` }));
         yield* Effect.yieldNow();
         yield* TestClock.adjust(interval);
       }
