@@ -3,8 +3,12 @@
  *
  * A minimal interface for building path-scoped processors. Each processor's `run`
  * is called once per path, with a path-scoped EventStream.
+ *
+ * Processors are started lazily - when the first event for a path arrives via
+ * subscribe({}), a processor is spawned for that path. The processor then uses
+ * its EventStream to read history and subscribe to live events.
  */
-import { Effect, Layer, Scope, Stream } from "effect";
+import { Effect, FiberMap, Layer, Scope, Stream } from "effect";
 
 import { StreamPath } from "../domain.js";
 import { EventStream, StreamManager } from "../services/stream-manager/index.js";
@@ -28,7 +32,8 @@ export interface Processor<R> {
 /**
  * Convert a Processor into a Layer.
  *
- * Spawns a processor for each path that has events.
+ * Spawns a processor lazily for each path when the first event arrives.
+ * Uses FiberMap to track active processors and prevent duplicates.
  */
 export const toLayer = <R>(
   processor: Processor<R>,
@@ -37,38 +42,28 @@ export const toLayer = <R>(
     Effect.gen(function* () {
       const streamManager = yield* StreamManager;
       const context = yield* Effect.context<Exclude<R, Scope.Scope>>();
-
-      // Track which paths we've started processors for
-      const activePaths = new Set<StreamPath>();
-
-      const startProcessor = (path: StreamPath) =>
-        Effect.gen(function* () {
-          if (activePaths.has(path)) return;
-          activePaths.add(path);
-
-          yield* Effect.log(`starting for path=${path}`);
-
-          const stream = yield* streamManager.forPath(path);
-          yield* processor.run(stream).pipe(
-            Effect.provide(context),
-            Effect.catchAllCause((cause) => Effect.logError(`error on path=${path}`, cause)),
-            Effect.forkScoped,
-          );
-        });
+      const processors = yield* FiberMap.make<StreamPath>();
 
       yield* Effect.log("starting");
 
-      // Discover existing paths and start processors
-      yield* streamManager.read({}).pipe(
-        Stream.runForEach((event) => startProcessor(event.path)),
-        Effect.catchAllCause((cause) => Effect.logError("discovery failed", cause)),
-      );
-
-      yield* Effect.log(`discovered ${activePaths.size} paths`);
-
-      // Watch for new paths
+      // Watch for events and start processors lazily
       yield* streamManager.subscribe({}).pipe(
-        Stream.runForEach((event) => startProcessor(event.path)),
+        Stream.runForEach((event) =>
+          Effect.gen(function* () {
+            const stream = yield* streamManager.forPath(event.path);
+            yield* FiberMap.run(
+              processors,
+              event.path,
+              processor.run(stream).pipe(
+                Effect.provide(context),
+                Effect.catchAllCause((cause) =>
+                  Effect.logError(`error on path=${event.path}`, cause),
+                ),
+              ),
+              { onlyIfMissing: true },
+            );
+          }),
+        ),
         Effect.catchAllCause((cause) => Effect.logError("watch failed", cause)),
         Effect.forkScoped,
       );
