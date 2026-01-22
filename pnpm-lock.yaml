@@ -91,7 +91,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  server/durable-stream:
+  server/consumers-rewrite:
     dependencies:
       '@effect/ai':
         specifier: ^0.33.2
