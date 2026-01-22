@@ -1,7 +1,7 @@
 /**
- * Simple Consumer Abstraction
+ * Simple Processor Abstraction
  *
- * A minimal interface for building path-scoped consumers. Each consumer's `run`
+ * A minimal interface for building path-scoped processors. Each processor's `run`
  * is called once per path, with a path-scoped SimpleStream.
  */
 import { Effect, Layer, Scope, Stream } from "effect";
@@ -14,7 +14,7 @@ import { StreamManager } from "../services/stream-manager/index.js";
 // -------------------------------------------------------------------------------------
 
 /**
- * A path-scoped stream interface for consumers.
+ * A path-scoped stream interface for processors.
  */
 export interface SimpleStream {
   /** The path this stream is scoped to */
@@ -31,13 +31,13 @@ export interface SimpleStream {
 }
 
 // -------------------------------------------------------------------------------------
-// SimpleConsumer
+// SimpleProcessor
 // -------------------------------------------------------------------------------------
 
 /**
- * A simple consumer - a function that runs per-path with a path-scoped SimpleStream.
+ * A simple processor - a function that runs per-path with a path-scoped SimpleStream.
  */
-export interface SimpleConsumer<R> {
+export interface SimpleProcessor<R> {
   readonly name: string;
   readonly run: (stream: SimpleStream) => Effect.Effect<void, never, R | Scope.Scope>;
 }
@@ -47,19 +47,19 @@ export interface SimpleConsumer<R> {
 // -------------------------------------------------------------------------------------
 
 /**
- * Convert a SimpleConsumer into a Layer.
+ * Convert a SimpleProcessor into a Layer.
  *
- * Spawns a consumer for each path that has events.
+ * Spawns a processor for each path that has events.
  */
 export const toLayer = <R>(
-  consumer: SimpleConsumer<R>,
+  processor: SimpleProcessor<R>,
 ): Layer.Layer<never, never, StreamManager | Exclude<R, Scope.Scope>> =>
   Layer.scopedDiscard(
     Effect.gen(function* () {
       const streamManager = yield* StreamManager;
       const context = yield* Effect.context<Exclude<R, Scope.Scope>>();
 
-      // Track which paths we've started consumers for
+      // Track which paths we've started processors for
       const activePaths = new Set<StreamPath>();
 
       const makeStream = (path: StreamPath): SimpleStream => ({
@@ -96,7 +96,7 @@ export const toLayer = <R>(
           ),
       });
 
-      const startConsumer = (path: StreamPath) =>
+      const startProcessor = (path: StreamPath) =>
         Effect.gen(function* () {
           if (activePaths.has(path)) return;
           activePaths.add(path);
@@ -104,7 +104,7 @@ export const toLayer = <R>(
           yield* Effect.log(`starting for path=${path}`);
 
           const stream = makeStream(path);
-          yield* consumer.run(stream).pipe(
+          yield* processor.run(stream).pipe(
             Effect.provide(context),
             Effect.catchAllCause((cause) => Effect.logError(`error on path=${path}`, cause)),
             Effect.forkScoped,
@@ -113,9 +113,9 @@ export const toLayer = <R>(
 
       yield* Effect.log("starting");
 
-      // Discover existing paths and start consumers
+      // Discover existing paths and start processors
       yield* streamManager.subscribe({ live: false }).pipe(
-        Stream.runForEach((event) => startConsumer(event.path)),
+        Stream.runForEach((event) => startProcessor(event.path)),
         Effect.catchAllCause((cause) => Effect.logError("discovery failed", cause)),
       );
 
@@ -123,9 +123,9 @@ export const toLayer = <R>(
 
       // Watch for new paths
       yield* streamManager.subscribe({ live: true }).pipe(
-        Stream.runForEach((event) => startConsumer(event.path)),
+        Stream.runForEach((event) => startProcessor(event.path)),
         Effect.catchAllCause((cause) => Effect.logError("watch failed", cause)),
         Effect.forkScoped,
       );
-    }).pipe(Effect.annotateLogs("consumer", consumer.name)),
+    }).pipe(Effect.annotateLogs("processor", processor.name)),
   );

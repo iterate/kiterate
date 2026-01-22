@@ -1,7 +1,7 @@
 /**
- * Consumer Abstraction
+ * Processor Abstraction
  *
- * A framework for building path-local stream consumers that:
+ * A framework for building path-local stream processors that:
  * - Track state per path
  * - Hydrate from historical events (apply only, no side effects)
  * - React to live events (apply + side effects)
@@ -12,17 +12,17 @@ import { Event, EventInput, Offset, type StreamPath } from "../domain.js";
 import { StreamManager } from "../services/stream-manager/index.js";
 
 // -------------------------------------------------------------------------------------
-// Consumer Definition
+// Processor Definition
 // -------------------------------------------------------------------------------------
 
 /**
- * A consumer definition - the core logic without boilerplate.
+ * A processor definition - the core logic without boilerplate.
  *
  * @template S - State type (per-path)
  * @template R - Dependencies required by react()
  */
-export interface Consumer<S, R> {
-  /** Consumer name for logging */
+export interface Processor<S, R> {
+  /** Processor name for logging */
   readonly name: string;
 
   /** Initial state for new paths */
@@ -52,11 +52,11 @@ export interface Consumer<S, R> {
 }
 
 // -------------------------------------------------------------------------------------
-// Consumer Runner
+// Processor Runner
 // -------------------------------------------------------------------------------------
 
 /**
- * Convert a Consumer definition into a Layer.
+ * Convert a Processor definition into a Layer.
  *
  * Handles all the boilerplate:
  * - Per-path state management
@@ -64,7 +64,7 @@ export interface Consumer<S, R> {
  * - Live subscription with reactions
  */
 export const toLayer = <S, R>(
-  consumer: Consumer<S, R>,
+  processor: Processor<S, R>,
 ): Layer.Layer<never, never, StreamManager | R> =>
   Layer.scopedDiscard(
     Effect.gen(function* () {
@@ -75,8 +75,8 @@ export const toLayer = <S, R>(
       const stateByPath = new Map<StreamPath, S>();
 
       const applyEvent = (event: Event): S => {
-        const old = stateByPath.get(event.path) ?? consumer.initial;
-        const next = consumer.apply(old, event);
+        const old = stateByPath.get(event.path) ?? processor.initial;
+        const next = processor.apply(old, event);
         stateByPath.set(event.path, next);
         return next;
       };
@@ -106,7 +106,7 @@ export const toLayer = <S, R>(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             const newState = applyEvent(event);
-            yield* consumer
+            yield* processor
               .react(newState, event, event.path, emit(event.path))
               .pipe(Effect.provide(context));
           }),
@@ -114,5 +114,5 @@ export const toLayer = <S, R>(
         Effect.catchAllCause((cause) => Effect.logError("error", cause)),
         Effect.forkScoped,
       );
-    }).pipe(Effect.annotateLogs("consumer", consumer.name)),
+    }).pipe(Effect.annotateLogs("processor", processor.name)),
   );

@@ -3,7 +3,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
-import { OpenAiSimpleConsumerLayer } from "./consumers/openai-simple.js";
+import { EffectAiProcessorLayer } from "./processors/effect-ai-processor.js";
 import { ServerLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
@@ -24,11 +24,11 @@ const LanguageModelLive = OpenAiLanguageModel.layer({ model: "gpt-4o" }).pipe(
   Layer.provide(OpenAiClientLive),
 );
 
-// Consumers (background processes that run with the server)
-const ConsumersLive = Layer.mergeAll(OpenAiSimpleConsumerLayer);
+// Processors (background processes that run with the server)
+const ProcessorsLive = Layer.mergeAll(EffectAiProcessorLayer);
 
-// StreamManager with consumers on top
-const StreamManagerLive = ConsumersLive.pipe(
+// StreamManager with processors on top
+const StreamManagerLive = ProcessorsLive.pipe(
   Layer.provideMerge(StreamManager.liveLayer),
   Layer.provide(StreamStorageLive),
   Layer.provide(LanguageModelLive),

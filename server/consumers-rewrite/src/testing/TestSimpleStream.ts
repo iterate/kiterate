@@ -10,7 +10,7 @@
 import { DateTime, Deferred, Duration, Effect, Queue, Scope, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
-import { SimpleStream } from "../consumers/simple-consumer.js";
+import { SimpleStream } from "../processors/simple-processor.js";
 
 /** Default timeout for wait operations */
 const DEFAULT_TIMEOUT = Duration.millis(300);

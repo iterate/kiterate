@@ -1,7 +1,7 @@
 /**
- * OpenAI Consumer (Simple)
+ * Effect AI Processor
  *
- * Triggers OpenAI generation when:
+ * Uses @effect/ai LanguageModel to trigger LLM generation when:
  * - The path is configured for "openai" model
  * - A user prompt event is received
  *
@@ -20,13 +20,13 @@ import {
   ResponseSseEvent,
   UserMessageEvent,
 } from "../events.js";
-import { SimpleConsumer, toLayer } from "./simple-consumer.js";
+import { SimpleProcessor, toLayer } from "./simple-processor.js";
 
 // -------------------------------------------------------------------------------------
 // State
 // -------------------------------------------------------------------------------------
 
-class State extends Schema.Class<State>("OpenAiConsumer/State")({
+class State extends Schema.Class<State>("EffectAiProcessor/State")({
   enabled: Schema.Boolean,
   lastOffset: Offset,
   history: Schema.Array(Schema.encodedSchema(Prompt.Message)),
@@ -80,7 +80,7 @@ const reduce = (state: State, event: Event): State => {
   }
 
   // TODO(claude): Something like this plz
-  // import * as OpenAiEvents from "consumers/openai/events"
+  // import * as EffectAiEvents from "processors/effect-ai/events"
 
   // User message - add to history and mark offset as pending
   if (UserMessageEvent.is(event)) {
@@ -110,11 +110,11 @@ const reduce = (state: State, event: Event): State => {
 };
 
 // -------------------------------------------------------------------------------------
-// Consumer
+// Processor
 // -------------------------------------------------------------------------------------
 
-export const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> = {
-  name: "openai",
+export const EffectAiProcessor: SimpleProcessor<LanguageModel.LanguageModel> = {
+  name: "effect-ai",
 
   run: (stream) =>
     Effect.gen(function* () {
@@ -193,4 +193,4 @@ export const OpenAiSimpleConsumer: SimpleConsumer<LanguageModel.LanguageModel> =
 // Layer
 // -------------------------------------------------------------------------------------
 
-export const OpenAiSimpleConsumerLayer = toLayer(OpenAiSimpleConsumer);
+export const EffectAiProcessorLayer = toLayer(EffectAiProcessor);

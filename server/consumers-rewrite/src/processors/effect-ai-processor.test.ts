@@ -13,7 +13,7 @@ import {
   RequestCancelledEvent,
 } from "../events.js";
 import { TestLanguageModel, makeTestSimpleStream } from "../testing/index.js";
-import { OpenAiSimpleConsumer } from "./openai-simple.js";
+import { EffectAiProcessor } from "./effect-ai-processor.js";
 
 // -------------------------------------------------------------------------------------
 // Tests
@@ -26,7 +26,7 @@ it.scoped("triggers LLM on user message when enabled", () =>
 
     // Setup
     yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
-    yield* OpenAiSimpleConsumer.run(stream).pipe(Effect.forkScoped);
+    yield* EffectAiProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
     // Send a user message
@@ -57,7 +57,7 @@ it.scoped("interrupts in-flight request when new user message arrives", () =>
 
     // Setup
     yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
-    yield* OpenAiSimpleConsumer.run(stream).pipe(Effect.forkScoped);
+    yield* EffectAiProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
     // Send first user message
