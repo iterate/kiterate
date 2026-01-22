@@ -1,6 +1,6 @@
 import { Response } from "@effect/ai";
 import { describe, it, expect } from "@effect/vitest";
-import { Effect, TestClock } from "effect";
+import { Duration, Effect, TestClock } from "effect";
 
 import { StreamPath } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
@@ -112,6 +112,76 @@ describe("LlmLoopProcessor", () => {
       // Request ended should reference second request
       const ended = yield* stream.waitForEvent(RequestEndedEvent);
       expect(ended.payload.requestOffset).toBe(secondRequest.offset);
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("debounces rapid messages into a single request", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+      // Setup
+      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Rapid user messages
+      yield* stream.appendEvent(UserMessageEvent.make({ content: "One" }));
+      yield* stream.appendEvent(UserMessageEvent.make({ content: "Two" }));
+      yield* stream.appendEvent(UserMessageEvent.make({ content: "Three" }));
+      yield* Effect.yieldNow();
+
+      const before = yield* stream.getEvents();
+      expect(before.filter(RequestStartedEvent.is)).toHaveLength(0);
+
+      yield* TestClock.adjust(llmDebounce.duration);
+      yield* lm.waitForCall();
+
+      const request = yield* stream.waitForEvent(RequestStartedEvent);
+      yield* lm.complete();
+      yield* stream.waitForEvent(RequestEndedEvent);
+
+      const after = yield* stream.getEvents();
+      const started = after.filter(RequestStartedEvent.is);
+      expect(started).toHaveLength(1);
+      expect(started[0]?.offset).toBe(request.offset);
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("executes within maxWait under continuous triggers", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+
+      // Setup
+      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      const interval = Duration.millis(150);
+      for (let i = 0; i < 12; i++) {
+        yield* stream.appendEvent(UserMessageEvent.make({ content: `Message ${i}` }));
+        yield* Effect.yieldNow();
+        yield* TestClock.adjust(interval);
+      }
+
+      const beforeMaxWait = yield* stream.getEvents();
+      expect(beforeMaxWait.filter(RequestStartedEvent.is)).toHaveLength(0);
+
+      yield* TestClock.adjust(Duration.millis(150));
+      const stillBefore = yield* stream.getEvents();
+      expect(stillBefore.filter(RequestStartedEvent.is)).toHaveLength(0);
+
+      yield* TestClock.adjust(Duration.millis(50));
+      yield* lm.waitForCall();
+
+      const request = yield* stream.waitForEvent(RequestStartedEvent);
+      yield* lm.complete();
+      yield* stream.waitForEvent(RequestEndedEvent);
+
+      const started = (yield* stream.getEvents()).filter(RequestStartedEvent.is);
+      expect(started).toHaveLength(1);
+      expect(started[0]?.offset).toBe(request.offset);
     }).pipe(Effect.provide(TestLanguageModel.layer)),
   );
 });
