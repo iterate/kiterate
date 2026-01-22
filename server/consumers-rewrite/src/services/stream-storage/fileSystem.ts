@@ -6,10 +6,10 @@
  */
 import * as Fs from "@effect/platform/FileSystem";
 import * as Path from "@effect/platform/Path";
-import { DateTime, Effect, Layer, Schema, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import * as YAML from "yaml";
 
-import { Event, EventInput, Offset, StreamPath, Version } from "../../domain.js";
+import { Event, Offset, StreamPath } from "../../domain.js";
 import {
   StreamStorage,
   StreamStorageError,
@@ -32,41 +32,15 @@ export const fileSystemLayer = (
       const getFilePath = (streamPath: StreamPath) =>
         path.join(basePath, `${streamPath.replace(/\//g, "_")}.yaml`);
 
-      const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
-
-      const countExistingDocs = (filePath: string) =>
+      const append = (event: Event) =>
         Effect.gen(function* () {
-          const exists = yield* fs.exists(filePath);
-          if (!exists) return 0;
-          const content = yield* fs.readFileString(filePath);
-          return YAML.parseAllDocuments(content).length;
-        });
-
-      const append = ({
-        path: streamPath,
-        event: input,
-      }: {
-        path: StreamPath;
-        event: EventInput;
-      }) =>
-        Effect.gen(function* () {
-          const filePath = getFilePath(streamPath);
-
-          // Derive offset from existing document count
-          const docCount = yield* countExistingDocs(filePath);
-          const offset = formatOffset(docCount);
-          const createdAt = yield* DateTime.now;
-          const version = input.version ?? Version.make("1");
-          const event = Event.make({ ...input, path: streamPath, offset, createdAt, version });
-
-          // Encode Event to YAML document
+          const filePath = getFilePath(event.path);
           const encoded = yield* Schema.encode(Event)(event);
           const yaml = YAML.stringify(encoded);
           const doc = "---\n" + yaml;
           yield* fs.writeFile(filePath, new TextEncoder().encode(doc), { flag: "a" });
-
           return event;
-        }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause })));
+        }).pipe(Effect.mapError((cause) => StreamStorageError.make({ cause, context: { event } })));
 
       const read = ({
         path: streamPath,
@@ -110,7 +84,7 @@ export const fileSystemLayer = (
             ...(options?.from !== undefined && { from: options.from }),
             ...(options?.to !== undefined && { to: options.to }),
           }).pipe(Stream.catchAllCause(() => Stream.empty)),
-        append: (event) => append({ path: streamPath, event }).pipe(Effect.orDie),
+        append: (event) => append(event).pipe(Effect.orDie),
       });
 
       return StreamStorageManager.of({

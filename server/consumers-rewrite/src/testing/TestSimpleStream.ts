@@ -36,7 +36,7 @@ interface WaitOptions {
   readonly timeout?: Duration.DurationInput;
 }
 
-export interface TestSimpleStream extends EventStream.EventStream {
+export interface TestEventStream extends EventStream.EventStream {
   /** Get all events that have been appended */
   readonly getEvents: () => Effect.Effect<readonly Event[]>;
   /** Wait until subscribe has been called */
@@ -54,9 +54,9 @@ export interface TestSimpleStream extends EventStream.EventStream {
   ) => Effect.Effect<readonly TypedEvent<S>[]>;
 }
 
-export const makeTestSimpleStream = (
+export const makeTestEventStream = (
   path: StreamPath,
-): Effect.Effect<TestSimpleStream, never, Scope.Scope> =>
+): Effect.Effect<TestEventStream, never, Scope.Scope> =>
   Effect.gen(function* () {
     const events: Event[] = [];
     const subscribers = yield* Queue.unbounded<Event>();

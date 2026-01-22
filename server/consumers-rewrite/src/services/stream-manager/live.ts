@@ -36,7 +36,7 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
 
         // Create path-scoped storage and wrap with EventStream
         const storage = storageManager.forPath(path);
-        return EventStream.make(storage).pipe(
+        return EventStream.make(storage, path).pipe(
           Effect.map((stream) => {
             streams.set(path, stream);
             const result: readonly [

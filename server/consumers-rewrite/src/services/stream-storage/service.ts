@@ -3,7 +3,7 @@
  */
 import { Context, Effect, Schema, Stream } from "effect";
 
-import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
+import { Event, Offset, StreamPath } from "../../domain.js";
 
 // -------------------------------------------------------------------------------------
 // Type ID (for nominal uniqueness)
@@ -20,6 +20,7 @@ export class StreamStorageError extends Schema.TaggedError<StreamStorageError>()
   "StreamStorageError",
   {
     cause: Schema.Defect,
+    context: Schema.optionalWith(Schema.Unknown, { default: () => undefined }),
   },
 ) {}
 
@@ -34,8 +35,8 @@ export interface StreamStorage {
   /** Read events from this stream */
   readonly read: (options?: { from?: Offset; to?: Offset }) => Stream.Stream<Event>;
 
-  /** Append an event to this stream, returns the stored event with assigned offset */
-  readonly append: (event: EventInput) => Effect.Effect<Event>;
+  /** Append an event to this stream (already has offset/createdAt assigned) */
+  readonly append: (event: Event) => Effect.Effect<Event>;
 }
 
 // -------------------------------------------------------------------------------------
@@ -65,11 +66,8 @@ export interface StreamStorageManager {
     to?: Offset;
   }) => Stream.Stream<Event, StreamStorageError>;
 
-  /** Append event input to stream, assign offset + createdAt, store, and return the event */
-  readonly append: (input: {
-    path: StreamPath;
-    event: EventInput;
-  }) => Effect.Effect<Event, StreamStorageError>;
+  /** Append event to stream (path is taken from event.path) */
+  readonly append: (event: Event) => Effect.Effect<Event, StreamStorageError>;
 }
 
 export const StreamStorageManager = Context.GenericTag<StreamStorageManager>(

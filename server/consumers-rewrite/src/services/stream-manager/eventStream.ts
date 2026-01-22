@@ -1,10 +1,29 @@
 /**
  * EventStream - single stream with history and replay
+ *
+ * Boot: reads history → reduces to derived state (current offset)
+ * EventStream owns offset management, storage is dumb (just persists Events)
  */
-import { Effect, PubSub, Ref, Stream } from "effect";
+import { DateTime, Effect, PubSub, Ref, Schema, Stream } from "effect";
 
-import { Event, EventInput, Offset } from "../../domain.js";
+import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
+
+// -------------------------------------------------------------------------------------
+// State (derived from event history)
+// -------------------------------------------------------------------------------------
+
+class State extends Schema.Class<State>("EventStream/State")({
+  lastOffset: Offset,
+}) {
+  static initial = new State({ lastOffset: Offset.make("-1") });
+}
+
+const reduce = (_state: State, event: Event): State => new State({ lastOffset: event.offset });
+
+const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
+
+const offsetToNumber = (offset: Offset): number => parseInt(offset, 10);
 
 // -------------------------------------------------------------------------------------
 // EventStream interface
@@ -28,14 +47,26 @@ export interface EventStream {
 /**
  * Create an EventStream from a path-scoped StreamStorage.
  * Wraps storage with PubSub for live event subscriptions.
+ *
+ * Boot: hydrates offset state from history before accepting appends.
  */
-export const make = (storage: StreamStorage): Effect.Effect<EventStream> =>
+export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<EventStream> =>
   Effect.gen(function* () {
+    // Boot: hydrate offset from history
+    const initialState = yield* storage.read().pipe(Stream.runFold(State.initial, reduce));
+    const stateRef = yield* Ref.make(initialState);
+
     const pubsub = yield* PubSub.unbounded<Event>();
 
     const append = (eventInput: EventInput) =>
       Effect.gen(function* () {
-        const event = yield* storage.append(eventInput);
+        const state = yield* Ref.get(stateRef);
+        const nextOffset = formatOffset(offsetToNumber(state.lastOffset) + 1);
+        const createdAt = yield* DateTime.now;
+        const event = Event.make({ ...eventInput, path, offset: nextOffset, createdAt });
+
+        yield* storage.append(event);
+        yield* Ref.set(stateRef, reduce(state, event));
         yield* PubSub.publish(pubsub, event);
         return event;
       });
