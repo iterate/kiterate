@@ -67,7 +67,7 @@ const createResultSummary = (
 
 Output: ${output ?? "undefined"}${logsSection}
 
-Please let the user know how it went.`;
+Please let the user know how it went. If you think it might be useful to generate a new codemode block, do so.`;
   } else {
     return `[Codemode execution failed]
 
