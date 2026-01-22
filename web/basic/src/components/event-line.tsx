@@ -1,5 +1,5 @@
 import { useState, memo, useCallback, useRef, useMemo } from "react";
-import { PlayIcon, PauseIcon } from "lucide-react";
+import { PlayIcon, PauseIcon, CodeIcon, TypeIcon } from "lucide-react";
 import { HarnessErrorAlert } from "./harness-error-alert.tsx";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block.tsx";
 import { Button } from "@/components/ui/button.tsx";
@@ -49,6 +49,7 @@ const MessageBubble = memo(function MessageBubble({
   const hasAudio = !!msg.audioData;
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const playbackRef = useRef<AudioPlaybackHandle | null>(null);
 
   const duration = useMemo(
@@ -96,9 +97,27 @@ const MessageBubble = memo(function MessageBubble({
               <span className="tabular-nums">{formatDuration(duration)}</span>
             </>
           )}
+          {text && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-5 px-1 text-[10px] gap-0.5"
+              onClick={() => setShowRaw(!showRaw)}
+              title={showRaw ? "Show formatted" : "Show raw"}
+            >
+              {showRaw ? <TypeIcon className="h-3 w-3" /> : <CodeIcon className="h-3 w-3" />}
+              {showRaw ? "fmt" : "raw"}
+            </Button>
+          )}
         </div>
         {text ? (
-          <MessageResponse>{text}</MessageResponse>
+          showRaw ? (
+            <pre className="whitespace-pre-wrap font-mono text-sm bg-muted/50 p-2 rounded overflow-x-auto">
+              {text}
+            </pre>
+          ) : (
+            <MessageResponse>{text}</MessageResponse>
+          )
         ) : hasAudio ? (
           <span className="opacity-60 italic text-sm">[Audio message]</span>
         ) : isStreaming ? (
