@@ -74,7 +74,7 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
         return event;
       });
 
-    const subscribe = (options?: { from?: Offset }) =>
+    const beSubscribedTo = (options?: { from?: Offset }) =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
           let lastOffset = options?.from ?? Offset.make("-1");
@@ -99,5 +99,5 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
     const read = (options?: { from?: Offset; to?: Offset }) =>
       storage.read(options).pipe(Stream.catchAllCause(() => Stream.empty));
 
-    return { append, subscribe, read };
+    return { append, subscribe: beSubscribedTo, read };
   });
