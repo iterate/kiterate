@@ -46,9 +46,14 @@ export interface EventStream {
 
 /**
  * Create an EventStream from a path-scoped StreamStorage.
- * Wraps storage with PubSub for live event subscriptions.
  *
- * Boot: hydrates offset state from history before accepting appends.
+ * Mirrors the Processor pattern: State class, reduce function, boot from history.
+ * Key difference: Processors react to events via their subscribe loop, but
+ * EventStream can't subscribe to itself (circular). Instead, EventStream reacts
+ * to events in `append` - after storage.write, we update state and publish.
+ *
+ * The `subscribe` method here is the inverse - it's "respond to a subscriber",
+ * not "subscribe to something". Like Cloudflare Workers' `fetch` handler.
  */
 export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<EventStream> =>
   Effect.gen(function* () {
