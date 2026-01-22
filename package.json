@@ -7,6 +7,8 @@
     "dev": "doppler run -- node dev.mjs",
     "dev:basic": "doppler run -- node dev.mjs basic",
     "typecheck": "pnpm -r typecheck",
+    "consumers": "cd server/consumers-rewrite && pnpm dev",
+    "test": "pnpm consumers test",
     "lint": "eslint . --fix",
     "lint:check": "eslint . --max-warnings 0",
     "format": "prettier --write .",
