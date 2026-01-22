@@ -4,7 +4,7 @@
 import { Context, Effect, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
-import { StreamStorageError } from "../stream-storage/service.js";
+import { EventStream } from "./eventStream.js";
 
 // -------------------------------------------------------------------------------------
 // StreamManager service
@@ -13,21 +13,20 @@ import { StreamStorageError } from "../stream-storage/service.js";
 export class StreamManager extends Context.Tag("@app/StreamManager")<
   StreamManager,
   {
-    readonly append: (input: {
-      path: StreamPath;
-      event: EventInput;
-    }) => Effect.Effect<Event, StreamStorageError>;
+    /** Get a path-scoped EventStream */
+    readonly forPath: (path: StreamPath) => Effect.Effect<EventStream>;
 
-    /**
-     * Subscribe to events on streams.
-     * @param path - If provided, filter to this exact path. If omitted, get events from all streams.
-     * @param after - Last seen offset (exclusive). Returns events with offset > after.
-     * @param live - If true, continues with live events after history. Default: false (history only).
-     */
-    readonly subscribe: (input: {
+    /** Subscribe to live events, optionally starting after an offset */
+    readonly subscribe: (input: { path?: StreamPath; from?: Offset }) => Stream.Stream<Event>;
+
+    /** Read historical events, optionally within a range */
+    readonly read: (input: {
       path?: StreamPath;
-      after?: Offset;
-      live?: boolean;
-    }) => Stream.Stream<Event, StreamStorageError>;
+      from?: Offset;
+      to?: Offset;
+    }) => Stream.Stream<Event>;
+
+    /** Append an event, returns the stored event with assigned offset */
+    readonly append: (input: { path: StreamPath; event: EventInput }) => Effect.Effect<Event>;
   }
 >() {}

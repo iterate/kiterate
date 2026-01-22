@@ -240,7 +240,7 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
             ...history,
           ];
 
-          const requestOffset = yield* stream.append(
+          const { offset: requestOffset } = yield* stream.append(
             RequestStartedEvent.make({ requestParams: prompt }),
           );
           const previousRequestOffset = yield* activeRequestFiber.replace(requestOffset);
@@ -260,7 +260,8 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
             ),
             Effect.onExit((exit) =>
               Exit.match(exit, {
-                onSuccess: () => stream.append(RequestEndedEvent.make({ requestOffset })),
+                onSuccess: () =>
+                  stream.append(RequestEndedEvent.make({ requestOffset })).pipe(Effect.asVoid),
                 onFailure: (cause) =>
                   Effect.gen(function* () {
                     yield* Effect.logError("generation failed", cause);

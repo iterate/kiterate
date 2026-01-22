@@ -5,7 +5,7 @@ import { Effect } from "effect";
 
 import { Offset, StreamPath } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
-import { makeTestSimpleStream, type TestSimpleStream } from "../../testing/index.js";
+import { makeTestEventStream, type TestEventStream } from "../../testing/index.js";
 import { RequestEndedEvent, RequestStartedEvent, ResponseSseEvent } from "../llm-loop/events.js";
 import {
   CodeBlockAddedEvent,
@@ -35,15 +35,15 @@ const decodeFailed = (event: { payload: unknown }) => {
 };
 
 // Helper to emit a codemode block
-const emitCodemodeBlock = (stream: TestSimpleStream, requestOffset: Offset, code: string) =>
+const emitCodemodeBlock = (stream: TestEventStream, requestOffset: Offset, code: string) =>
   Effect.gen(function* () {
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({ id: "msg1", delta: code }),
         requestOffset,
       }),
     );
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
   });
 
 // -------------------------------------------------------------------------------------
@@ -52,22 +52,22 @@ const emitCodemodeBlock = (stream: TestSimpleStream, requestOffset: Offset, code
 
 it.scoped("parses codemode block and evaluates successfully", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     const requestOffset = requestStarted.offset;
 
     // Emit SSE events with a codemode block
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({ id: "msg1", delta: "Here's some code:\n" }),
         requestOffset,
       }),
     );
-    yield* stream.appendEvent(
+    yield* stream.append(
       ResponseSseEvent.make({
         part: Response.textDeltaPart({
           id: "msg1",
@@ -77,7 +77,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
       }),
     );
 
-    yield* stream.appendEvent(RequestEndedEvent.make({ requestOffset }));
+    yield* stream.append(RequestEndedEvent.make({ requestOffset }));
 
     // Wait for codemode events
     const added = yield* stream.waitForEvent(CodeBlockAddedEvent);
@@ -102,12 +102,12 @@ it.scoped("parses codemode block and evaluates successfully", () =>
 
 it.scoped("captures console.log calls", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -134,12 +134,12 @@ it.scoped("captures console.log calls", () =>
 
 it.scoped("handles evaluation errors", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -166,12 +166,12 @@ it.scoped("handles evaluation errors", () =>
 
 it.scoped("handles missing codemode function", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -191,12 +191,12 @@ it.scoped("handles missing codemode function", () =>
 
 it.scoped("handles multiple codemode blocks", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -237,12 +237,12 @@ it.scoped("handles multiple codemode blocks", () =>
 
 it.scoped("handles non-serializable return values", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -270,12 +270,12 @@ it.scoped("handles non-serializable return values", () =>
 
 it.scoped("appends user message with output after successful execution", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -301,12 +301,12 @@ it.scoped("appends user message with output after successful execution", () =>
 
 it.scoped("appends user message with error after failed execution", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -331,12 +331,12 @@ it.scoped("appends user message with error after failed execution", () =>
 
 it.scoped("includes console logs in user message summary", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,
@@ -365,12 +365,12 @@ it.scoped("includes console logs in user message summary", () =>
 
 it.scoped("includes console logs in failed execution summary", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
     yield* stream.waitForSubscribe();
 
-    const requestStarted = yield* stream.appendEvent(RequestStartedEvent.make());
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
     yield* emitCodemodeBlock(
       stream,
       requestStarted.offset,

@@ -12,12 +12,12 @@ import { liveLayer } from "./live.js";
 const testLayer = liveLayer.pipe(Layer.provide(StreamStorage.inMemoryLayer));
 
 describe("StreamManager", () => {
-  it.effect("late subscriber receives historical events", () =>
+  it.effect("read returns historical events", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const path = StreamPath.make("test/durable");
 
-      // Append events before subscribing
+      // Append events before reading
       yield* manager.append({
         path,
         event: EventInput.make({ type: EventType.make("test"), payload: { message: "first" } }),
@@ -27,8 +27,8 @@ describe("StreamManager", () => {
         event: EventInput.make({ type: EventType.make("test"), payload: { message: "second" } }),
       });
 
-      // Late subscriber should get history
-      const events = yield* manager.subscribe({ path }).pipe(Stream.take(2), Stream.runCollect);
+      // Read should get history and complete
+      const events = yield* manager.read({ path }).pipe(Stream.runCollect);
 
       const arr = Chunk.toReadonlyArray(events);
       expect(arr).toHaveLength(2);
@@ -39,7 +39,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("subscribe with from skips seen events (exclusive)", () =>
+  it.effect("read with from skips seen events (exclusive)", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const path = StreamPath.make("test/offset");
@@ -58,9 +58,9 @@ describe("StreamManager", () => {
         event: EventInput.make({ type: EventType.make("test"), payload: { idx: 2 } }),
       });
 
-      // Subscribe with from=offset1 meaning "I've seen offset 1, give me what's after"
+      // Read with from=offset1 meaning "I've seen offset 1, give me what's after"
       const events = yield* manager
-        .subscribe({ path, after: Offset.make("0000000000000001") })
+        .read({ path, from: Offset.make("0000000000000001") })
         .pipe(Stream.runCollect);
 
       const arr = Chunk.toReadonlyArray(events);
@@ -70,7 +70,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("historical subscribe does not receive later events", () =>
+  it.effect("read does not receive later events", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const path = StreamPath.make("test/historical-only");
@@ -81,8 +81,8 @@ describe("StreamManager", () => {
         event: EventInput.make({ type: EventType.make("test"), payload: { kind: "historical" } }),
       });
 
-      // Historical subscriber should complete after existing events
-      const events = yield* manager.subscribe({ path }).pipe(Stream.runCollect);
+      // Read should complete after existing events
+      const events = yield* manager.read({ path }).pipe(Stream.runCollect);
 
       const arr = Chunk.toReadonlyArray(events);
       expect(arr).toHaveLength(1);
@@ -90,7 +90,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("resubscribe after processing resumes without duplicates", () =>
+  it.effect("read after processing resumes without duplicates", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const path = StreamPath.make("test/resubscribe");
@@ -103,8 +103,8 @@ describe("StreamManager", () => {
         });
       }
 
-      // First subscription: get first 2 events
-      const firstBatch = yield* manager.subscribe({ path }).pipe(Stream.take(2), Stream.runCollect);
+      // First read: get first 2 events
+      const firstBatch = yield* manager.read({ path }).pipe(Stream.take(2), Stream.runCollect);
       const firstArr = Chunk.toReadonlyArray(firstBatch);
       expect(firstArr.map((e) => e.payload["idx"])).toEqual([0, 1]);
 
@@ -112,9 +112,9 @@ describe("StreamManager", () => {
       const lastProcessedOffset = firstArr[1].offset;
       expect(lastProcessedOffset).toBe("0000000000000001");
 
-      // Resubscribe with from=lastProcessedOffset (meaning "I've seen this, give me what's after")
+      // Read with from=lastProcessedOffset (meaning "I've seen this, give me what's after")
       const secondBatch = yield* manager
-        .subscribe({ path, after: lastProcessedOffset })
+        .read({ path, from: lastProcessedOffset })
         .pipe(Stream.runCollect);
       const secondArr = Chunk.toReadonlyArray(secondBatch);
 
@@ -128,7 +128,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("all paths subscription returns historical events", () =>
+  it.effect("all paths read returns historical events", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const pathA = StreamPath.make("test/all-history/a");
@@ -147,7 +147,7 @@ describe("StreamManager", () => {
         event: EventInput.make({ type: EventType.make("test"), payload: { idx: 0 } }),
       });
 
-      const events = yield* manager.subscribe({}).pipe(Stream.runCollect);
+      const events = yield* manager.read({}).pipe(Stream.runCollect);
       const arr = Chunk.toReadonlyArray(events);
 
       expect(arr).toHaveLength(3);
@@ -163,7 +163,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("all paths subscribe with after filters per path", () =>
+  it.effect("all paths read with from filters per path", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const pathA = StreamPath.make("test/all-after/a");
@@ -183,7 +183,7 @@ describe("StreamManager", () => {
       });
 
       const events = yield* manager
-        .subscribe({ after: Offset.make("0000000000000000") })
+        .read({ from: Offset.make("0000000000000000") })
         .pipe(Stream.runCollect);
 
       const arr = Chunk.toReadonlyArray(events);
@@ -196,7 +196,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("all paths live subscription receives history then live events", () =>
+  it.effect("all paths subscribe receives history then live events", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const pathA = StreamPath.make("test/all-live/a");
@@ -215,7 +215,7 @@ describe("StreamManager", () => {
       const seenHistory = yield* Ref.make(0);
       const historyCount = 2;
 
-      const subscriber = yield* manager.subscribe({ live: true }).pipe(
+      const subscriber = yield* manager.subscribe({}).pipe(
         Stream.tap(() =>
           Ref.updateAndGet(seenHistory, (count) => count + 1).pipe(
             Effect.flatMap((count) =>
@@ -262,7 +262,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("live subscribe with after resumes without duplicates", () =>
+  it.effect("subscribe with from resumes without duplicates", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const path = StreamPath.make("test/live-after");
@@ -281,7 +281,7 @@ describe("StreamManager", () => {
       const historyCount = 1;
 
       const subscriber = yield* manager
-        .subscribe({ path, after: Offset.make("0000000000000000"), live: true })
+        .subscribe({ path, from: Offset.make("0000000000000000") })
         .pipe(
           Stream.tap(() =>
             Ref.updateAndGet(seenHistory, (count) => count + 1).pipe(
@@ -310,7 +310,7 @@ describe("StreamManager", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.live("subscribe with live=true receives history then live events", () =>
+  it.live("subscribe receives history then live events", () =>
     Effect.gen(function* () {
       const manager = yield* StreamManager.StreamManager;
       const path = StreamPath.make("test/history-and-live");
@@ -321,9 +321,9 @@ describe("StreamManager", () => {
         event: EventInput.make({ type: EventType.make("test"), payload: { kind: "historical" } }),
       });
 
-      // Subscribe with live=true (history + live)
+      // Subscribe (always live = history + live)
       const subscriber = yield* manager
-        .subscribe({ path, live: true })
+        .subscribe({ path })
         .pipe(Stream.take(2), Stream.runCollect, Effect.fork);
 
       yield* Effect.sleep("1 millis");

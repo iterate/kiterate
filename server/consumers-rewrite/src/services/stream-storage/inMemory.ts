@@ -1,44 +1,61 @@
 /**
- * In-memory implementation of StreamStorage
+ * In-memory implementation of StreamStorageManager
  */
-import { DateTime, Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Stream } from "effect";
 
 import { Event, Offset, StreamPath } from "../../domain.js";
-import { StreamStorage, StreamStorageTypeId } from "./service.js";
+import { StreamStorage, StreamStorageManager, StreamStorageManagerTypeId } from "./service.js";
 
-export const inMemoryLayer: Layer.Layer<StreamStorage> = Layer.sync(StreamStorage, () => {
-  const streams = new Map<StreamPath, { events: Event[]; nextOffset: number }>();
+export const inMemoryLayer: Layer.Layer<StreamStorageManager> = Layer.sync(
+  StreamStorageManager,
+  () => {
+    const streams = new Map<StreamPath, Event[]>();
 
-  const getOrCreateStream = (path: StreamPath) => {
-    let stream = streams.get(path);
-    if (!stream) {
-      stream = { events: [], nextOffset: 0 };
-      streams.set(path, stream);
-    }
-    return stream;
-  };
+    const getOrCreateStream = (path: StreamPath) => {
+      let stream = streams.get(path);
+      if (!stream) {
+        stream = [];
+        streams.set(path, stream);
+      }
+      return stream;
+    };
 
-  const formatOffset = (n: number): Offset => Offset.make(n.toString().padStart(16, "0"));
-
-  return StreamStorage.of({
-    [StreamStorageTypeId]: StreamStorageTypeId,
-    listPaths: () => Effect.succeed(Array.from(streams.keys())),
-    append: ({ path, event: input }) =>
-      Effect.gen(function* () {
-        const stream = getOrCreateStream(path);
-        const offset = formatOffset(stream.nextOffset++);
-        const createdAt = yield* DateTime.now;
-        const event = Event.make({ ...input, path, offset, createdAt });
-        stream.events.push(event);
+    const append = (event: Event) =>
+      Effect.sync(() => {
+        const stream = getOrCreateStream(event.path);
+        stream.push(event);
         return event;
-      }),
-    read: ({ path, after }) =>
+      });
+
+    const read = ({ path, from, to }: { path: StreamPath; from?: Offset; to?: Offset }) =>
       Stream.suspend(() => {
         const stream = getOrCreateStream(path);
-        // after = last seen offset, so return events AFTER it (exclusive)
-        const events =
-          after !== undefined ? stream.events.filter((e) => e.offset > after) : stream.events;
+        let events = stream;
+        if (from !== undefined) {
+          events = events.filter((e) => e.offset > from);
+        }
+        if (to !== undefined) {
+          events = events.filter((e) => e.offset <= to);
+        }
         return Stream.fromIterable(events);
-      }),
-  });
-});
+      });
+
+    const forPath = (path: StreamPath): StreamStorage => ({
+      read: (options) =>
+        read({
+          path,
+          ...(options?.from !== undefined && { from: options.from }),
+          ...(options?.to !== undefined && { to: options.to }),
+        }).pipe(Stream.catchAllCause(() => Stream.empty)),
+      append: (event) => append(event).pipe(Effect.orDie),
+    });
+
+    return StreamStorageManager.of({
+      [StreamStorageManagerTypeId]: StreamStorageManagerTypeId,
+      listPaths: () => Effect.succeed(Array.from(streams.keys())),
+      forPath,
+      append,
+      read,
+    });
+  },
+);

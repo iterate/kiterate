@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect";
 
 import { StreamPath } from "../domain.js";
 import { EventSchema } from "../events.js";
-import { makeTestSimpleStream } from "./TestSimpleStream.js";
+import { makeTestEventStream } from "./TestSimpleStream.js";
 
 // Simple test event schemas
 const PingEvent = EventSchema.make("test:ping", {});
@@ -16,12 +16,12 @@ const MessageEvent = EventSchema.make("test:message", { content: Schema.String }
 
 it.scoped("waitForEvent consumes events - each call returns the next one", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     // Append three ping events
-    yield* stream.appendEvent(PingEvent.make());
-    yield* stream.appendEvent(PingEvent.make());
-    yield* stream.appendEvent(PingEvent.make());
+    yield* stream.append(PingEvent.make());
+    yield* stream.append(PingEvent.make());
+    yield* stream.append(PingEvent.make());
 
     // Each waitForEvent returns the NEXT unconsumed event
     const ping1 = yield* stream.waitForEvent(PingEvent);
@@ -37,13 +37,13 @@ it.scoped("waitForEvent consumes events - each call returns the next one", () =>
 
 it.scoped("waitForEvent waits for future events if none available", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     // Start waiting for a ping (none exist yet)
     const pingFiber = yield* stream.waitForEvent(PingEvent).pipe(Effect.fork);
 
     // Append a ping
-    yield* stream.appendEvent(PingEvent.make());
+    yield* stream.append(PingEvent.make());
 
     // The wait should resolve
     const ping = yield* Effect.fromFiber(pingFiber);
@@ -53,13 +53,13 @@ it.scoped("waitForEvent waits for future events if none available", () =>
 
 it.scoped("waitForEvent tracks consumption per event type independently", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
     // Interleave ping and pong events
-    yield* stream.appendEvent(PingEvent.make()); // offset 0
-    yield* stream.appendEvent(PongEvent.make()); // offset 1
-    yield* stream.appendEvent(PingEvent.make()); // offset 2
-    yield* stream.appendEvent(PongEvent.make()); // offset 3
+    yield* stream.append(PingEvent.make()); // offset 0
+    yield* stream.append(PongEvent.make()); // offset 1
+    yield* stream.append(PingEvent.make()); // offset 2
+    yield* stream.append(PongEvent.make()); // offset 3
 
     // Wait for pings - should get 0 and 2 (skipping pongs)
     const ping1 = yield* stream.waitForEvent(PingEvent);
@@ -77,11 +77,11 @@ it.scoped("waitForEvent tracks consumption per event type independently", () =>
 
 it.scoped("waitForEventCount returns multiple events at once", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
-    yield* stream.appendEvent(PingEvent.make());
-    yield* stream.appendEvent(PingEvent.make());
-    yield* stream.appendEvent(PingEvent.make());
+    yield* stream.append(PingEvent.make());
+    yield* stream.append(PingEvent.make());
+    yield* stream.append(PingEvent.make());
 
     // Get first 2 pings
     const first2 = yield* stream.waitForEventCount(PingEvent, 2);
@@ -97,9 +97,9 @@ it.scoped("waitForEventCount returns multiple events at once", () =>
 
 it.scoped("waitForEvent returns typed payload", () =>
   Effect.gen(function* () {
-    const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
-    yield* stream.appendEvent(MessageEvent.make({ content: "hello" }));
+    yield* stream.append(MessageEvent.make({ content: "hello" }));
 
     const msg = yield* stream.waitForEvent(MessageEvent);
 

@@ -25,15 +25,15 @@ const subscribeHandler = Effect.gen(function* () {
   const offsetParam = url.searchParams.get("offset");
   const liveParam = url.searchParams.get("live");
 
-  const after = offsetParam ? Offset.make(offsetParam) : undefined;
+  const from = offsetParam ? Offset.make(offsetParam) : undefined;
   const live = liveParam === "sse" || liveParam === "true";
 
   const manager = yield* StreamManager.StreamManager;
-  const stream = manager
-    .subscribe({ path, ...(after && { after }), live })
-    .pipe(Stream.map(Sse.data));
+  const stream = live
+    ? manager.subscribe({ path, ...(from && { from }) })
+    : manager.read({ path, ...(from && { from }) });
 
-  return Sse.response(stream);
+  return Sse.response(stream.pipe(Stream.map(Sse.data)));
 });
 
 // POST /agents/* -> append event

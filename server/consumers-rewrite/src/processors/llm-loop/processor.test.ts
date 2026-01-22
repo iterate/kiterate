@@ -5,7 +5,7 @@ import { Duration, Effect, TestClock } from "effect";
 
 import { StreamPath } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
-import { TestLanguageModel, makeTestSimpleStream } from "../../testing/index.js";
+import { TestLanguageModel, makeTestEventStream } from "../../testing/index.js";
 import {
   LlmLoopActivatedEvent,
   RequestCancelledEvent,
@@ -25,15 +25,15 @@ describe("LlmLoopProcessor", () => {
   it.scoped("triggers LLM on user message when enabled", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Send a user message
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Hello!" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
       yield* lm.waitForCall();
@@ -58,15 +58,15 @@ describe("LlmLoopProcessor", () => {
   it.scoped("interrupts in-flight request when new user message arrives", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Send first user message
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "First message" }));
+      yield* stream.append(UserMessageEvent.make({ content: "First message" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
       yield* lm.waitForCall();
@@ -85,9 +85,7 @@ describe("LlmLoopProcessor", () => {
       expect(sse2.payload.requestOffset).toBe(firstRequest.offset);
 
       // Send second user message - this triggers interruption
-      yield* stream.appendEvent(
-        UserMessageEvent.make({ content: "Second message (interrupts first)" }),
-      );
+      yield* stream.append(UserMessageEvent.make({ content: "Second message (interrupts first)" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
 
@@ -121,17 +119,17 @@ describe("LlmLoopProcessor", () => {
   it.scoped("debounces rapid messages into a single request", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Rapid user messages
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "One" }));
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Two" }));
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Three" }));
+      yield* stream.append(UserMessageEvent.make({ content: "One" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Two" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Three" }));
       yield* Effect.yieldNow();
 
       const before = yield* stream.getEvents();
@@ -154,16 +152,16 @@ describe("LlmLoopProcessor", () => {
   it.scoped("executes within maxWait under continuous triggers", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
       // Setup
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       const interval = Duration.millis(150);
       for (let i = 0; i < 13; i++) {
-        yield* stream.appendEvent(UserMessageEvent.make({ content: `Message ${i}` }));
+        yield* stream.append(UserMessageEvent.make({ content: `Message ${i}` }));
         yield* Effect.yieldNow();
         yield* TestClock.adjust(interval);
       }
@@ -186,13 +184,13 @@ describe("LlmLoopProcessor", () => {
 
   it.scoped("emits LlmLoopActivatedEvent when model is configured", () =>
     Effect.gen(function* () {
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
       // Configure openai model
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* Effect.yieldNow();
 
       // Should emit activated event
@@ -204,9 +202,9 @@ describe("LlmLoopProcessor", () => {
   it.scoped("handles SystemPromptEditEvent with append mode", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
@@ -215,7 +213,7 @@ describe("LlmLoopProcessor", () => {
       yield* stream.waitForEvent(LlmLoopActivatedEvent);
 
       // Append to system prompt
-      yield* stream.appendEvent(
+      yield* stream.append(
         SystemPromptEditEvent.make({
           mode: "append",
           content: "You can also do math.",
@@ -224,7 +222,7 @@ describe("LlmLoopProcessor", () => {
       );
 
       // Send a user message to trigger LLM
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Hello!" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
 
@@ -244,9 +242,9 @@ describe("LlmLoopProcessor", () => {
   it.scoped("handles SystemPromptEditEvent with replace mode", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
@@ -255,7 +253,7 @@ describe("LlmLoopProcessor", () => {
       yield* stream.waitForEvent(LlmLoopActivatedEvent);
 
       // Replace system prompt entirely
-      yield* stream.appendEvent(
+      yield* stream.append(
         SystemPromptEditEvent.make({
           mode: "replace",
           content: "You are a pirate.",
@@ -263,7 +261,7 @@ describe("LlmLoopProcessor", () => {
         }),
       );
 
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Hello!" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
 
@@ -281,9 +279,9 @@ describe("LlmLoopProcessor", () => {
   it.scoped("handles SystemPromptEditEvent with prepend mode", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
-      const stream = yield* makeTestSimpleStream(StreamPath.make("test"));
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
 
-      yield* stream.appendEvent(ConfigSetEvent.make({ model: "openai" }));
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
@@ -292,7 +290,7 @@ describe("LlmLoopProcessor", () => {
       yield* stream.waitForEvent(LlmLoopActivatedEvent);
 
       // Prepend to system prompt
-      yield* stream.appendEvent(
+      yield* stream.append(
         SystemPromptEditEvent.make({
           mode: "prepend",
           content: "IMPORTANT: Always be concise.",
@@ -300,7 +298,7 @@ describe("LlmLoopProcessor", () => {
         }),
       );
 
-      yield* stream.appendEvent(UserMessageEvent.make({ content: "Hello!" }));
+      yield* stream.append(UserMessageEvent.make({ content: "Hello!" }));
       yield* Effect.yieldNow();
       yield* TestClock.adjust(llmDebounce.duration);
 
