@@ -2,18 +2,17 @@ import { Response } from "@effect/ai";
 import { it, expect } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { StreamPath } from "../domain.js";
+import { StreamPath } from "../../domain.js";
+import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
+import { TestLanguageModel, makeTestSimpleStream } from "../../testing/index.js";
 import {
-  ConfigSetEvent,
-  UserMessageEvent,
-  RequestStartedEvent,
-  ResponseSseEvent,
+  RequestCancelledEvent,
   RequestEndedEvent,
   RequestInterruptedEvent,
-  RequestCancelledEvent,
-} from "../events.js";
-import { TestLanguageModel, makeTestSimpleStream } from "../testing/index.js";
-import { EffectAiProcessor } from "./effect-ai-processor.js";
+  RequestStartedEvent,
+  ResponseSseEvent,
+} from "./events.js";
+import { EffectAiProcessor } from "./processor.js";
 
 // -------------------------------------------------------------------------------------
 // Tests

@@ -10,17 +10,16 @@
 import { LanguageModel, Prompt } from "@effect/ai";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream, type Types } from "effect";
 
-import { Event, Offset } from "../domain.js";
+import { Event, Offset } from "../../domain.js";
+import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
+import { Processor, toLayer } from "../processor.js";
 import {
-  ConfigSetEvent,
   RequestCancelledEvent,
   RequestEndedEvent,
   RequestInterruptedEvent,
   RequestStartedEvent,
   ResponseSseEvent,
-  UserMessageEvent,
-} from "../events.js";
-import { SimpleProcessor, toLayer } from "./simple-processor.js";
+} from "./events.js";
 
 // -------------------------------------------------------------------------------------
 // State
@@ -79,9 +78,6 @@ const reduce = (state: State, event: Event): State => {
     return State.make({ ...base, enabled: event.payload.model === "openai" });
   }
 
-  // TODO(claude): Something like this plz
-  // import * as EffectAiEvents from "processors/effect-ai/events"
-
   // User message - add to history and mark offset as pending
   if (UserMessageEvent.is(event)) {
     return State.make({
@@ -113,7 +109,7 @@ const reduce = (state: State, event: Event): State => {
 // Processor
 // -------------------------------------------------------------------------------------
 
-export const EffectAiProcessor: SimpleProcessor<LanguageModel.LanguageModel> = {
+export const EffectAiProcessor: Processor<LanguageModel.LanguageModel> = {
   name: "effect-ai",
 
   run: (stream) =>

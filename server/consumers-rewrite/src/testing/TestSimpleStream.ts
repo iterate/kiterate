@@ -1,7 +1,7 @@
 /**
- * TestSimpleStream - a mock SimpleStream for testing
+ * TestSimpleStream - a mock ProcessorStream for testing
  *
- * Extends SimpleStream with test control methods for inspecting events,
+ * Extends ProcessorStream with test control methods for inspecting events,
  * waiting for subscription, and waiting for specific event types.
  *
  * The wait methods consume events - each call returns the *next* matching event,
@@ -10,7 +10,7 @@
 import { DateTime, Deferred, Duration, Effect, Queue, Scope, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
-import { SimpleStream } from "../processors/simple-processor.js";
+import { ProcessorStream } from "../processors/processor.js";
 
 /** Default timeout for wait operations */
 const DEFAULT_TIMEOUT = Duration.millis(300);
@@ -36,7 +36,7 @@ interface WaitOptions {
   readonly timeout?: Duration.DurationInput;
 }
 
-export interface TestSimpleStream extends SimpleStream {
+export interface TestSimpleStream extends ProcessorStream {
   /** Append an event and return the full Event (not just offset) */
   readonly appendEvent: (event: EventInput) => Effect.Effect<Event>;
   /** Get all events that have been appended */
@@ -175,15 +175,15 @@ export const makeTestSimpleStream = (
     return {
       path,
 
-      // SimpleStream interface
-      read: (options) => {
+      // ProcessorStream interface
+      read: (options?: { from?: Offset; to?: Offset }) => {
         const snapshot = [...events];
         return Stream.fromIterable(snapshot).pipe(
           Stream.filter((e) => (options?.from ? Offset.gt(e.offset, options.from) : true)),
         );
       },
 
-      subscribe: (options) =>
+      subscribe: (options?: { from?: Offset }) =>
         Effect.gen(function* () {
           const snapshot = [...events];
           yield* Deferred.succeed(subscribed, void 0);
@@ -197,7 +197,7 @@ export const makeTestSimpleStream = (
           );
         }).pipe(Stream.unwrap),
 
-      append: (input) => appendImpl(input).pipe(Effect.map((e) => e.offset)),
+      append: (input: EventInput) => appendImpl(input).pipe(Effect.map((e) => e.offset)),
 
       // Test control methods
       appendEvent: appendImpl,

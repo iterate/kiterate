@@ -56,6 +56,43 @@ const streamStorageTests = <E>(
       }).pipe(Effect.provide(makeLayer())),
     );
 
+    it.effect("listPaths returns empty when no streams", () =>
+      Effect.gen(function* () {
+        const storage = yield* StreamStorage.StreamStorage;
+
+        const paths = yield* storage.listPaths();
+
+        expect(paths).toEqual([]);
+      }).pipe(Effect.provide(makeLayer())),
+    );
+
+    it.effect("listPaths returns unique paths", () =>
+      Effect.gen(function* () {
+        const storage = yield* StreamStorage.StreamStorage;
+        const pathA = StreamPath.make("test/list/a");
+        const pathB = StreamPath.make("test/list/b");
+
+        yield* storage.append({
+          path: pathA,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        yield* storage.append({
+          path: pathA,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+        });
+        yield* storage.append({
+          path: pathB,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 3 } }),
+        });
+
+        const paths = yield* storage.listPaths();
+
+        expect(paths).toHaveLength(2);
+        expect(new Set(paths).size).toBe(2);
+        expect(paths).toEqual(expect.arrayContaining([pathA, pathB]));
+      }).pipe(Effect.provide(makeLayer())),
+    );
+
     it.effect("read returns all stored events", () =>
       Effect.gen(function* () {
         const storage = yield* StreamStorage.StreamStorage;
@@ -110,6 +147,28 @@ const streamStorageTests = <E>(
         expect(arr).toHaveLength(1);
         expect(arr.map((e) => e.offset)).toEqual(["0000000000000002"]);
         expect(arr.map((e) => e.payload)).toEqual([{ n: 2 }]);
+      }).pipe(Effect.provide(makeLayer())),
+    );
+
+    it.effect("read after beyond last offset returns empty", () =>
+      Effect.gen(function* () {
+        const storage = yield* StreamStorage.StreamStorage;
+        const path = StreamPath.make("test/after-last");
+
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 1 } }),
+        });
+        yield* storage.append({
+          path,
+          event: EventInput.make({ type: EventType.make("test"), payload: { n: 2 } }),
+        });
+
+        const events = yield* storage
+          .read({ path, after: Offset.make("0000000000000009") })
+          .pipe(Stream.runCollect);
+
+        expect(Chunk.toReadonlyArray(events)).toEqual([]);
       }).pipe(Effect.provide(makeLayer())),
     );
 

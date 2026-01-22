@@ -1,14 +1,12 @@
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { EventInput, EventType, Offset, Payload } from "./domain.js";
+import { ConfigSetEvent, EventSchema, UserMessageEvent } from "./events.js";
 import {
-  ConfigSetEvent,
-  EventSchema,
   RequestEndedEvent,
   RequestStartedEvent,
   ResponseSseEvent,
-  UserMessageEvent,
-} from "./events.js";
+} from "./processors/effect-ai/events.js";
 
 describe("EventSchema", () => {
   // ---------------------------------------------------------------------------
@@ -29,7 +27,7 @@ describe("EventSchema", () => {
         requestOffset: Offset.make("0000000000000001"),
       });
 
-      expect(event.type).toBe("iterate:openai:response:sse");
+      expect(event.type).toBe("iterate:effect-ai:response:sse");
       expect(event.payload).toEqual({
         part: { type: "text-delta", delta: "Hi" },
         requestOffset: "0000000000000001",
@@ -47,7 +45,7 @@ describe("EventSchema", () => {
     it("allows omitting payload for empty schemas", () => {
       const event = RequestStartedEvent.make();
 
-      expect(event.type).toBe("iterate:openai:request-started");
+      expect(event.type).toBe("iterate:effect-ai:request-started");
       expect(event.payload).toEqual({});
     });
   });

@@ -1,8 +1,8 @@
 /**
- * Simple Processor Abstraction
+ * Processor Abstraction
  *
  * A minimal interface for building path-scoped processors. Each processor's `run`
- * is called once per path, with a path-scoped SimpleStream.
+ * is called once per path, with a path-scoped ProcessorStream.
  */
 import { Effect, Layer, Scope, Stream } from "effect";
 
@@ -10,13 +10,13 @@ import { Event, EventInput, Offset, StreamPath } from "../domain.js";
 import { StreamManager } from "../services/stream-manager/index.js";
 
 // -------------------------------------------------------------------------------------
-// SimpleStream
+// ProcessorStream
 // -------------------------------------------------------------------------------------
 
 /**
  * A path-scoped stream interface for processors.
  */
-export interface SimpleStream {
+export interface ProcessorStream {
   /** The path this stream is scoped to */
   readonly path: StreamPath;
 
@@ -31,15 +31,15 @@ export interface SimpleStream {
 }
 
 // -------------------------------------------------------------------------------------
-// SimpleProcessor
+// Processor
 // -------------------------------------------------------------------------------------
 
 /**
- * A simple processor - a function that runs per-path with a path-scoped SimpleStream.
+ * A processor - a function that runs per-path with a path-scoped ProcessorStream.
  */
-export interface SimpleProcessor<R> {
+export interface Processor<R> {
   readonly name: string;
-  readonly run: (stream: SimpleStream) => Effect.Effect<void, never, R | Scope.Scope>;
+  readonly run: (stream: ProcessorStream) => Effect.Effect<void, never, R | Scope.Scope>;
 }
 
 // -------------------------------------------------------------------------------------
@@ -47,12 +47,12 @@ export interface SimpleProcessor<R> {
 // -------------------------------------------------------------------------------------
 
 /**
- * Convert a SimpleProcessor into a Layer.
+ * Convert a Processor into a Layer.
  *
  * Spawns a processor for each path that has events.
  */
 export const toLayer = <R>(
-  processor: SimpleProcessor<R>,
+  processor: Processor<R>,
 ): Layer.Layer<never, never, StreamManager | Exclude<R, Scope.Scope>> =>
   Layer.scopedDiscard(
     Effect.gen(function* () {
@@ -62,7 +62,7 @@ export const toLayer = <R>(
       // Track which paths we've started processors for
       const activePaths = new Set<StreamPath>();
 
-      const makeStream = (path: StreamPath): SimpleStream => ({
+      const makeStream = (path: StreamPath): ProcessorStream => ({
         path,
 
         subscribe: (options) =>

@@ -3,7 +3,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
-import { EffectAiProcessorLayer } from "./processors/effect-ai-processor.js";
+import { EffectAiProcessorLayer } from "./processors/effect-ai/index.js";
 import { ServerLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";

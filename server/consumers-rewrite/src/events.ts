@@ -1,9 +1,8 @@
 /**
  * Typed event schemas for creating and parsing events with compile-time safety
  */
-import { Response } from "@effect/ai";
 import { Effect, Option, ParseResult, Schema } from "effect";
-import { Event, EventInput, EventType, Offset } from "./domain.js";
+import { Event, EventInput, EventType } from "./domain.js";
 
 // -------------------------------------------------------------------------------------
 // EventSchema
@@ -79,32 +78,4 @@ export const UserMessageEvent = EventSchema.make("iterate:agent:action:send-user
 
 export const UserAudioEvent = EventSchema.make("iterate:agent:action:send-user-audio:called", {
   audio: Schema.String,
-});
-
-export const RequestStartedEvent = EventSchema.make("iterate:openai:request-started", {});
-
-const _ResponseSseEvent = EventSchema.make("iterate:openai:response:sse", {
-  part: Schema.Unknown,
-  requestOffset: Offset,
-});
-
-const decodeTextDelta = Schema.decodeUnknownOption(Response.TextDeltaPart);
-
-export const ResponseSseEvent = Object.assign(_ResponseSseEvent, {
-  /** Decode the part as a TextDeltaPart, if applicable */
-  decodeTextDelta: (part: unknown): Option.Option<Response.TextDeltaPart> => decodeTextDelta(part),
-});
-
-export const RequestEndedEvent = EventSchema.make("iterate:openai:request-ended", {
-  requestOffset: Offset,
-});
-
-export const RequestCancelledEvent = EventSchema.make("iterate:openai:request-cancelled", {
-  requestOffset: Offset,
-  reason: Schema.String,
-  message: Schema.String,
-});
-
-export const RequestInterruptedEvent = EventSchema.make("iterate:openai:request-interrupted", {
-  requestOffset: Schema.NullOr(Offset),
 });
