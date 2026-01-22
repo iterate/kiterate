@@ -14,7 +14,6 @@ import { subscribeClient } from "./testing.js";
 
 const testLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(StreamManager.agentTestLayer),
     Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),

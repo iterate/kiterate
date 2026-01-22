@@ -9,7 +9,6 @@ import * as StreamStorage from "./services/stream-storage/index.js";
 
 const testLayer = Layer.merge(
   AppLive.pipe(
-    Layer.provide(StreamManager.agentTestLayer),
     Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
     Layer.provide(NodeHttpServer.layerTest),

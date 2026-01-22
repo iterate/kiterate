@@ -10,4 +10,3 @@ export * as EventStream from "./eventStream.js";
 
 // Re-export layers
 export { liveLayer } from "./live.js";
-export { agentLayer, testLayer as agentTestLayer } from "./agent.js";
