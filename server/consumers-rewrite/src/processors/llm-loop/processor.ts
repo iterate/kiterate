@@ -8,23 +8,13 @@
  * Maintains conversation history and sends it with each request.
  */
 import { LanguageModel, Prompt } from "@effect/ai";
-import {
-  Cause,
-  Duration,
-  Effect,
-  Exit,
-  FiberMap,
-  Option,
-  Ref,
-  Schema,
-  Stream,
-  type Scope,
-} from "effect";
+import { Cause, Duration, Effect, Exit, Option, Schema, Stream } from "effect";
 
 import { Event, Offset } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
+import { makeActiveRequestFiber } from "./activeRequestFiber.js";
 import {
   LlmLoopActivatedEvent,
   RequestCancelledEvent,
@@ -93,15 +83,6 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
 
 type History = State["history"];
 
-type ActiveRequestFiber = {
-  readonly replace: (requestOffset: Offset) => Effect.Effect<Option.Option<Offset>>;
-  readonly run: <R>(
-    requestOffset: Offset,
-    effect: Effect.Effect<void, never, R>,
-  ) => Effect.Effect<void, never, R>;
-  readonly currentOffset: Effect.Effect<Option.Option<Offset>>;
-};
-
 // -------------------------------------------------------------------------------------
 // Reducer
 // -------------------------------------------------------------------------------------
@@ -155,8 +136,19 @@ const reduce = (state: State, event: Event): State => {
   if (RequestStartedEvent.is(event)) {
     return state.with({ llmLastRespondedAt: Option.some(event.offset) });
   }
-  // request-ended and request-cancelled don't affect state
-  // (in-flight tracking is handled by FiberMap locally)
+
+  // Request cancelled due to interrupt - mark the partial response so LLM knows it was cut off
+  if (RequestCancelledEvent.is(event) && event.payload.reason === "interrupted") {
+    const last = state.history.at(-1);
+    if (last?.role === "assistant") {
+      return state.with({
+        history: [
+          ...state.history.slice(0, -1),
+          { ...last, content: last.content + "\n\n[response interrupted by user]" },
+        ],
+      });
+    }
+  }
 
   // Assistant response - parse our own emitted SSE events
   if (ResponseSseEvent.is(event)) {
@@ -174,37 +166,6 @@ export const llmDebounce = {
   duration: Duration.millis(200),
   maxWait: Duration.seconds(2),
 };
-
-const makeActiveRequestFiber = (): Effect.Effect<ActiveRequestFiber, never, Scope.Scope> =>
-  Effect.gen(function* () {
-    const map = yield* FiberMap.make<"active", void>();
-    const offsetRef = yield* Ref.make<Option.Option<Offset>>(Option.none());
-
-    const replace = (requestOffset: Offset) =>
-      Ref.modify(offsetRef, (current): [Option.Option<Offset>, Option.Option<Offset>] => [
-        current,
-        Option.some(requestOffset),
-      ]);
-
-    const clearIfActive = (requestOffset: Offset) =>
-      Ref.update(offsetRef, (current) => {
-        if (Option.isSome(current) && current.value === requestOffset) {
-          return Option.none();
-        }
-        return current;
-      });
-
-    const run = <R>(requestOffset: Offset, effect: Effect.Effect<void, never, R>) =>
-      FiberMap.run(map, "active", effect.pipe(Effect.ensuring(clearIfActive(requestOffset))), {
-        propagateInterruption: true,
-      }).pipe(Effect.asVoid);
-
-    return {
-      replace,
-      run,
-      currentOffset: Ref.get(offsetRef),
-    };
-  });
 
 // -------------------------------------------------------------------------------------
 // Processor
@@ -243,14 +204,6 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
           const { offset: requestOffset } = yield* stream.append(
             RequestStartedEvent.make({ requestParams: prompt }),
           );
-          const previousRequestOffset = yield* activeRequestFiber.replace(requestOffset);
-          if (Option.isSome(previousRequestOffset)) {
-            yield* stream.append(
-              RequestInterruptedEvent.make({
-                requestOffset: previousRequestOffset.value,
-              }),
-            );
-          }
 
           yield* Effect.log(`triggering generation, history=${history.length} messages`);
 
@@ -278,7 +231,14 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
             Effect.catchAllCause(() => Effect.void),
           );
 
-          yield* activeRequestFiber.run(requestOffset, requestEffect);
+          const previousRequestOffset = yield* activeRequestFiber.run(requestOffset, requestEffect);
+          if (Option.isSome(previousRequestOffset)) {
+            yield* stream.append(
+              RequestInterruptedEvent.make({
+                requestOffset: previousRequestOffset.value,
+              }),
+            );
+          }
         });
 
       const debounced = yield* makeDebounced(startRequest, llmDebounce);
