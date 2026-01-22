@@ -1,7 +1,7 @@
 /**
  * Live implementation of StreamManager
  */
-import { Effect, Layer, PubSub, Stream } from "effect";
+import { Effect, Layer, PubSub, Stream, SynchronizedRef } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
@@ -16,19 +16,35 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
   StreamManager,
   Effect.gen(function* () {
     const storage = yield* StreamStorage;
-    const streams = new Map<StreamPath, EventStream.EventStream>();
+    const streamsRef = yield* SynchronizedRef.make(new Map<StreamPath, EventStream.EventStream>());
 
     // Global PubSub for all events (used for "all paths" subscriptions)
     const globalPubSub = yield* PubSub.unbounded<Event>();
 
-    const getOrCreateStream = Effect.fn(function* (path: StreamPath) {
-      const existing = streams.get(path);
-      if (existing) {
-        return existing;
-      }
-      const stream = yield* EventStream.make({ storage, path });
-      streams.set(path, stream);
-      return stream;
+    const getOrCreateStream = Effect.fn("StreamManager.getOrCreateStream")(function* (
+      path: StreamPath,
+    ) {
+      return yield* SynchronizedRef.modifyEffect(streamsRef, (streams) => {
+        const existing = streams.get(path);
+        if (existing) {
+          const result: readonly [
+            EventStream.EventStream,
+            Map<StreamPath, EventStream.EventStream>,
+          ] = [existing, streams];
+          return Effect.succeed(result);
+        }
+
+        return EventStream.make({ storage, path }).pipe(
+          Effect.map((stream) => {
+            streams.set(path, stream);
+            const result: readonly [
+              EventStream.EventStream,
+              Map<StreamPath, EventStream.EventStream>,
+            ] = [stream, streams];
+            return result;
+          }),
+        );
+      });
     });
 
     const append = Effect.fn("StreamManager.append")(function* ({
@@ -113,7 +129,7 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
               const dedupedLive = liveStream.pipe(
                 Stream.filter((event) => {
                   const lastOffset = lastOffsetByPath.get(event.path) ?? Offset.make("-1");
-                  if (event.offset > lastOffset) {
+                  if (Offset.gt(event.offset, lastOffset)) {
                     lastOffsetByPath.set(event.path, event.offset);
                     return true;
                   }
@@ -127,6 +143,6 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorage> = Layer
         }).pipe(Effect.withSpan("StreamManager.subscribe")),
       );
 
-    return { append, subscribe };
+    return StreamManager.of({ append, subscribe });
   }),
 );

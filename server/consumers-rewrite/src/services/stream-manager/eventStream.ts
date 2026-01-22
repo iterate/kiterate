@@ -35,12 +35,15 @@ export const make = (input: {
     const { storage, path } = input;
     const pubsub = yield* PubSub.unbounded<Event>();
 
-    const append = ({ event: eventInput }: { event: EventInput }) =>
-      Effect.gen(function* () {
-        const event = yield* storage.append({ path, event: eventInput });
-        yield* PubSub.publish(pubsub, event);
-        return event;
-      });
+    const append = Effect.fn("EventStream.append")(function* ({
+      event: eventInput,
+    }: {
+      event: EventInput;
+    }) {
+      const event = yield* storage.append({ path, event: eventInput });
+      yield* PubSub.publish(pubsub, event);
+      return event;
+    });
 
     const subscribe = (options?: { after?: Offset; live?: boolean }) =>
       Stream.unwrapScoped(
@@ -68,7 +71,14 @@ export const make = (input: {
 
           const dedupedLive = liveStream.pipe(
             Stream.filterEffect((event) =>
-              Ref.get(lastOffsetRef).pipe(Effect.map((lastOffset) => event.offset > lastOffset)),
+              Ref.modify(lastOffsetRef, (lastOffset) => {
+                if (Offset.gt(event.offset, lastOffset)) {
+                  const result: readonly [boolean, Offset] = [true, event.offset];
+                  return result;
+                }
+                const result: readonly [boolean, Offset] = [false, lastOffset];
+                return result;
+              }),
             ),
           );
 
