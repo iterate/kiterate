@@ -7,8 +7,8 @@
  *
  * Maintains conversation history and sends it with each request.
  */
-import { LanguageModel, Prompt, Response } from "@effect/ai";
-import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
+import { LanguageModel, Prompt } from "@effect/ai";
+import { Cause, Effect, Exit, Fiber, Option, Schema, Stream, type Types } from "effect";
 
 import { Event, Offset } from "../domain.js";
 import {
@@ -49,14 +49,28 @@ class State extends Schema.Class<State>("OpenAiConsumer/State")({
     if (Option.isNone(this.llmLastRespondedAt)) return true;
     return Offset.gt(this.llmRequestRequiredFrom.value, this.llmLastRespondedAt.value);
   }
-}
 
-const decodeTextDelta = Schema.decodeUnknownOption(Response.TextDeltaPart);
+  /** Append text delta to conversation history, creating or extending assistant message */
+  appendAssistantDelta(delta: string): Types.Simplify<State> {
+    const last = this.history.at(-1);
+    if (last?.role === "assistant") {
+      return State.make({
+        ...this,
+        history: [...this.history.slice(0, -1), { ...last, content: last.content + delta }],
+      });
+    }
+    return State.make({
+      ...this,
+      history: [...this.history, { role: "assistant", content: delta }],
+    });
+  }
+}
 
 // -------------------------------------------------------------------------------------
 // Reducer
 // -------------------------------------------------------------------------------------
 
+// TODO(claude): Possibly eventually export a Reducer for this that contains the State
 const reduce = (state: State, event: Event): State => {
   const base = { ...state, lastOffset: event.offset };
 
@@ -64,6 +78,9 @@ const reduce = (state: State, event: Event): State => {
   if (ConfigSetEvent.is(event)) {
     return State.make({ ...base, enabled: event.payload.model === "openai" });
   }
+
+  // TODO(claude): Something like this plz
+  // import * as OpenAiEvents from "consumers/openai/events"
 
   // User message - add to history and mark offset as pending
   if (UserMessageEvent.is(event)) {
@@ -83,23 +100,9 @@ const reduce = (state: State, event: Event): State => {
 
   // Assistant response - parse our own emitted SSE events
   if (ResponseSseEvent.is(event)) {
-    // Append text delta directly to history
-    const textDelta = decodeTextDelta(event.payload.part);
+    const textDelta = ResponseSseEvent.decodeTextDelta(event.payload.part);
     if (Option.isSome(textDelta)) {
-      const last = state.history.at(-1);
-      if (last?.role === "assistant") {
-        return State.make({
-          ...base,
-          history: [
-            ...state.history.slice(0, -1),
-            { ...last, content: last.content + textDelta.value.delta },
-          ],
-        });
-      }
-      return State.make({
-        ...base,
-        history: [...state.history, { role: "assistant", content: textDelta.value.delta }],
-      });
+      return State.make({ ...base }).appendAssistantDelta(textDelta.value.delta);
     }
   }
 

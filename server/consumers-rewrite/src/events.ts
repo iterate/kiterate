@@ -1,8 +1,9 @@
 /**
  * Typed event schemas for creating and parsing events with compile-time safety
  */
+import { Response } from "@effect/ai";
 import { Effect, Option, ParseResult, Schema } from "effect";
-import { Event, EventInput, EventType, Offset, Payload } from "./domain.js";
+import { Event, EventInput, EventType, Offset } from "./domain.js";
 
 // -------------------------------------------------------------------------------------
 // EventSchema
@@ -35,11 +36,11 @@ export const EventSchema = {
     return {
       type: eventType,
       typeString: type,
-      make: ((payload?: P) =>
+      make: (payload?: P) =>
         EventInput.make({
           type: eventType,
-          payload: (payload ?? {}) as Payload,
-        })) as EventSchema<Type, P>["make"],
+          payload: payload ?? {},
+        }),
       decodeOption: (event) => {
         if (String(event.type) !== type) return Option.none();
         return decodePayloadOption(event.payload);
@@ -82,9 +83,16 @@ export const UserAudioEvent = EventSchema.make("iterate:agent:action:send-user-a
 
 export const RequestStartedEvent = EventSchema.make("iterate:openai:request-started", {});
 
-export const ResponseSseEvent = EventSchema.make("iterate:openai:response:sse", {
+const _ResponseSseEvent = EventSchema.make("iterate:openai:response:sse", {
   part: Schema.Unknown,
   requestOffset: Offset,
+});
+
+const decodeTextDelta = Schema.decodeUnknownOption(Response.TextDeltaPart);
+
+export const ResponseSseEvent = Object.assign(_ResponseSseEvent, {
+  /** Decode the part as a TextDeltaPart, if applicable */
+  decodeTextDelta: (part: unknown): Option.Option<Response.TextDeltaPart> => decodeTextDelta(part),
 });
 
 export const RequestEndedEvent = EventSchema.make("iterate:openai:request-ended", {

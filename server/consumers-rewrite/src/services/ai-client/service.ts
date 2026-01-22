@@ -7,6 +7,7 @@ import { LanguageModel } from "@effect/ai";
 import { Context, Effect, Layer, Option, Schema, Stream } from "effect";
 
 import { EventInput, EventType, type StreamPath } from "../../domain.js";
+import { ConfigSetEvent, UserAudioEvent, UserMessageEvent } from "../../events.js";
 import { GrokVoiceClient, type GrokVoiceConnection } from "../grok-voice/client.js";
 
 // -------------------------------------------------------------------------------------
@@ -25,22 +26,18 @@ export class AudioPrompt extends Schema.TaggedClass<AudioPrompt>()("AudioPrompt"
 export type PromptInput = TextPrompt | AudioPrompt;
 export const PromptInput = Object.assign(Schema.Union(TextPrompt, AudioPrompt), {
   /** Extract a PromptInput from an EventInput, if applicable */
-  fromEventInput: (event: EventInput): Option.Option<PromptInput> => {
-    if (event.type === "iterate:agent:action:send-user-message:called") {
-      const content = event.payload["content"];
-      if (typeof content === "string") {
-        return Option.some(new TextPrompt({ content }));
-      }
-    }
-    if (event.type === "iterate:agent:action:send-user-audio:called") {
-      const audio = event.payload["audio"];
-      if (typeof audio === "string") {
-        const data = new Uint8Array(Buffer.from(audio, "base64"));
-        return Option.some(new AudioPrompt({ data }));
-      }
-    }
-    return Option.none();
-  },
+  fromEventInput: (event: EventInput): Option.Option<PromptInput> =>
+    Option.orElse(
+      Option.map(
+        UserMessageEvent.decodeOption(event),
+        (p) => new TextPrompt({ content: p.content }),
+      ),
+      () =>
+        Option.map(UserAudioEvent.decodeOption(event), (p) => {
+          const data = new Uint8Array(Buffer.from(p.audio, "base64"));
+          return new AudioPrompt({ data });
+        }),
+    ),
 });
 
 // -------------------------------------------------------------------------------------
@@ -48,15 +45,8 @@ export const PromptInput = Object.assign(Schema.Union(TextPrompt, AudioPrompt), 
 // -------------------------------------------------------------------------------------
 
 export const AiModelType = Object.assign(Schema.Literal("openai", "grok"), {
-  fromEventInput: (event: EventInput): Option.Option<AiModelType> => {
-    if (event.type === "iterate:agent:config:set") {
-      const model = event.payload["model"];
-      if (Schema.is(AiModelType)(model)) {
-        return Option.some(model);
-      }
-    }
-    return Option.none();
-  },
+  fromEventInput: (event: EventInput): Option.Option<AiModelType> =>
+    Option.map(ConfigSetEvent.decodeOption(event), (p) => p.model),
 });
 export type AiModelType = typeof AiModelType.Type;
 

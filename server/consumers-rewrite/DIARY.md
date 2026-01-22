@@ -71,6 +71,60 @@ return Offset.gt(this.llmRequestRequiredFrom.value, this.llmLastRespondedAt.valu
 
 ---
 
+## 2026-01-21 ~17:15
+
+### Added type narrowing and consumption tracking to TestSimpleStream
+
+**Problem:** `waitForEvent(RequestStartedEvent)` was returning `TypedEvent<{ readonly [x: string]: unknown }>` instead of a properly typed event. Also, calling `waitForEvent` twice returned the same event, making sequence testing awkward.
+
+**Solution:**
+
+1. **Type narrowing** - Updated local `EventSchema` interface to match actual structure with `<Type extends string, P>`. Added `PayloadOf<S>` and `TypeOf<S>` helper types. Now `waitForEvent(RequestStartedEvent)` returns `Event & { type: "iterate:openai:request-started"; payload: {} }`.
+
+2. **Consumption tracking** - Each event type has its own consumption counter. `waitForEvent` returns the next unconsumed event of that type. Independent per-type tracking means waiting for Pings doesn't affect waiting for Pongs.
+
+3. **Default timeout** - 300ms default with optional override prevents tests hanging forever.
+
+Added `TestSimpleStream.test.ts` documenting the consumption API.
+
+---
+
+## 2026-01-21 ~17:00
+
+### Extracted test utilities to src/testing/ folder
+
+Created dedicated folder with:
+
+- **TestLanguageModel** - Context.Tag providing both test control (`emit`, `complete`, `fail`, `waitForCall`) AND `LanguageModel.LanguageModel`. Uses `Layer.scopedContext` to share same instance under both tags.
+
+- **TestSimpleStream** - Mock `SimpleStream` extending the interface with test methods (`appendEvent`, `getEvents`, `waitForSubscribe`, `waitForEvent`, `waitForEventCount`).
+
+---
+
+## 2026-01-21 ~16:45
+
+### Adopted linear wait-and-assert pattern in tests
+
+**Problem:** Tests collecting all events at end and asserting out of order were hard to follow.
+
+**Solution:** Wait for each event as it should arrive, assert immediately:
+
+```typescript
+// Before (hard to follow)
+const events = yield * stream.getEvents();
+const request = events.find((e) => RequestStartedEvent.is(e));
+
+// After (linear, clear)
+const request = yield * stream.waitForEvent(RequestStartedEvent);
+yield * lm.emit(Response.textDeltaPart({ id: "msg1", delta: "Hi!" }));
+const sse = yield * stream.waitForEvent(ResponseSseEvent);
+expect(sse.payload.requestOffset).toBe(request.offset);
+```
+
+Also switched to `Response.textDeltaPart()` for type-safe stream part construction.
+
+---
+
 ## 2026-01-21 16:15
 
 ### Fixed LLM re-triggering loop

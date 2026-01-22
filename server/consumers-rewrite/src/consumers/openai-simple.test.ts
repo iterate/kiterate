@@ -41,7 +41,7 @@ it.scoped("triggers LLM on user message when enabled", () =>
     yield* lm.complete();
 
     // SSE event should reference the request
-    const [sse] = yield* stream.waitForEventCount(ResponseSseEvent, 1);
+    const sse = yield* stream.waitForEvent(ResponseSseEvent);
     expect(sse.payload.requestOffset).toBe(request.offset);
 
     // Request ended should reference the request
