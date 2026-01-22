@@ -9,6 +9,10 @@ import { Context, Deferred, Effect, Layer, Queue, Stream } from "effect";
 
 type StreamPart = Response.StreamPart<{}>;
 
+export interface CallInfo {
+  readonly prompt: unknown;
+}
+
 export interface TestLanguageModelService extends LanguageModel.Service {
   /** Emit a stream part to the current LLM call */
   readonly emit: (part: StreamPart) => Effect.Effect<void>;
@@ -16,8 +20,8 @@ export interface TestLanguageModelService extends LanguageModel.Service {
   readonly complete: () => Effect.Effect<void>;
   /** Fail the current LLM stream with an error */
   readonly fail: (error: Error) => Effect.Effect<void>;
-  /** Wait for the next LLM call to be made */
-  readonly waitForCall: () => Effect.Effect<void>;
+  /** Wait for the next LLM call to be made, returns call info including prompt */
+  readonly waitForCall: () => Effect.Effect<CallInfo>;
 }
 
 export class TestLanguageModel extends Context.Tag("TestLanguageModel")<
@@ -29,9 +33,10 @@ export class TestLanguageModel extends Context.Tag("TestLanguageModel")<
       Effect.gen(function* () {
         // Mutable state - using let since we're in a closure
         let callCount = 0;
-        const callWaiters: Deferred.Deferred<void>[] = [];
+        const callWaiters: Deferred.Deferred<CallInfo>[] = [];
         let currentQueue: Queue.Queue<StreamPart> | null = null;
         let currentCompletion: Deferred.Deferred<void> | null = null;
+        let lastCallInfo: CallInfo | null = null;
 
         const service: TestLanguageModelService = {
           // Test control methods
@@ -42,16 +47,18 @@ export class TestLanguageModel extends Context.Tag("TestLanguageModel")<
             currentCompletion ? Deferred.succeed(currentCompletion, void 0) : Effect.void, // TODO: proper stream failure
           waitForCall: () =>
             Effect.gen(function* () {
-              // If we've already had more calls than waiters, return immediately
-              if (callCount > callWaiters.length) return;
+              // If we've already had more calls than waiters, return immediately with last call info
+              if (callCount > callWaiters.length) {
+                return lastCallInfo!;
+              }
               // Otherwise create a waiter for the next call
-              const deferred = yield* Deferred.make<void>();
+              const deferred = yield* Deferred.make<CallInfo>();
               callWaiters.push(deferred);
-              yield* Deferred.await(deferred);
+              return yield* Deferred.await(deferred);
             }),
 
           // LanguageModel.Service implementation
-          streamText: () =>
+          streamText: (options) =>
             Effect.gen(function* () {
               // Set up fresh queue and completion for this call
               const queue = yield* Queue.unbounded<StreamPart>();
@@ -59,10 +66,14 @@ export class TestLanguageModel extends Context.Tag("TestLanguageModel")<
               currentQueue = queue;
               currentCompletion = completion;
 
+              // Capture call info
+              const callInfo: CallInfo = { prompt: options.prompt };
+              lastCallInfo = callInfo;
+
               // Increment call count and notify waiters
               callCount++;
               const waiter = callWaiters[callCount - 1];
-              if (waiter) yield* Deferred.succeed(waiter, void 0);
+              if (waiter) yield* Deferred.succeed(waiter, callInfo);
 
               return Stream.fromQueue(queue).pipe(
                 Stream.interruptWhen(Deferred.await(completion)),

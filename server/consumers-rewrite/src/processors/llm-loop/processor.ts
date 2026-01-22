@@ -26,16 +26,21 @@ import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
 import {
+  LlmLoopActivatedEvent,
   RequestCancelledEvent,
   RequestEndedEvent,
   RequestInterruptedEvent,
   RequestStartedEvent,
   ResponseSseEvent,
+  SystemPromptEditEvent,
 } from "./events.js";
 
 // -------------------------------------------------------------------------------------
 // State
 // -------------------------------------------------------------------------------------
+
+/** Default base system prompt */
+const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
 
 class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   enabled: Schema.Boolean,
@@ -45,6 +50,10 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   llmRequestRequiredFrom: Schema.Option(Offset),
   /** Offset of most recent request-started (never cleared, used for trigger comparison) */
   llmLastRespondedAt: Schema.Option(Offset),
+  /** Current system prompt (built from edits) */
+  systemPrompt: Schema.String,
+  /** Whether we've emitted the activated event for the current enabled state */
+  activatedEventEmitted: Schema.Boolean,
 }) {
   static initial = State.make({
     enabled: false,
@@ -52,6 +61,8 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
     history: [],
     llmRequestRequiredFrom: Option.none(),
     llmLastRespondedAt: Option.none(),
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    activatedEventEmitted: false,
   });
 
   /** Create a new State with the given updates */
@@ -101,7 +112,35 @@ const reduce = (state: State, event: Event): State => {
 
   // Config change
   if (ConfigSetEvent.is(event)) {
-    return state.with({ enabled: event.payload.model === "openai" });
+    const nowEnabled = event.payload.model === "openai";
+    // Reset activatedEventEmitted when enabling (so we emit activated event)
+    return state.with({
+      enabled: nowEnabled,
+      activatedEventEmitted: nowEnabled ? state.activatedEventEmitted : false,
+    });
+  }
+
+  // Track our own activated event
+  if (LlmLoopActivatedEvent.is(event)) {
+    return state.with({ activatedEventEmitted: true });
+  }
+
+  // System prompt edit
+  if (SystemPromptEditEvent.is(event)) {
+    const { mode, content } = event.payload;
+    let newPrompt: string;
+    switch (mode) {
+      case "replace":
+        newPrompt = content;
+        break;
+      case "prepend":
+        newPrompt = content + "\n\n" + state.systemPrompt;
+        break;
+      case "append":
+        newPrompt = state.systemPrompt + "\n\n" + content;
+        break;
+    }
+    return state.with({ systemPrompt: newPrompt });
   }
 
   // User message - add to history and mark offset as pending
@@ -187,9 +226,23 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
 
       const activeRequestFiber = yield* makeActiveRequestFiber();
 
-      const startRequest = (history: History) =>
+      const startRequest = ({
+        history,
+        systemPrompt,
+      }: {
+        history: History;
+        systemPrompt: string;
+      }) =>
         Effect.gen(function* () {
-          const { offset: requestOffset } = yield* stream.append(RequestStartedEvent.make());
+          // Build prompt with system message
+          const prompt: Prompt.MessageEncoded[] = [
+            { role: "system", content: systemPrompt },
+            ...history,
+          ];
+
+          const { offset: requestOffset } = yield* stream.append(
+            RequestStartedEvent.make({ requestParams: prompt }),
+          );
           const previousRequestOffset = yield* activeRequestFiber.replace(requestOffset);
           if (Option.isSome(previousRequestOffset)) {
             yield* stream.append(
@@ -201,7 +254,7 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
 
           yield* Effect.log(`triggering generation, history=${history.length} messages`);
 
-          const requestEffect = lm.streamText({ prompt: history }).pipe(
+          const requestEffect = lm.streamText({ prompt }).pipe(
             Stream.runForEach((part) =>
               stream.append(ResponseSseEvent.make({ part, requestOffset })),
             ),
@@ -230,17 +283,33 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
 
       const debounced = yield* makeDebounced(startRequest, llmDebounce);
 
+      // Emit activated event if we're already enabled after hydration
+      if (state.enabled && !state.activatedEventEmitted) {
+        yield* stream.append(LlmLoopActivatedEvent.make());
+        state = state.with({ activatedEventEmitted: true });
+      }
+
       // Phase 2: Subscribe to live events
       yield* stream.subscribe({ from: state.lastOffset }).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             state = reduce(state, event);
 
+            // Emit activated event when we become enabled (and haven't emitted yet)
+            if (state.enabled && !state.activatedEventEmitted) {
+              yield* stream.append(LlmLoopActivatedEvent.make());
+              state = reduce(state, {
+                type: "iterate:llm-loop:activated",
+                offset: state.lastOffset,
+                payload: {},
+              } as Event);
+            }
+
             // !enabled only blocks future triggers; pending debounced runs still execute.
             if (!state.enabled) return;
             if (!state.shouldTriggerLlmResponse) return;
 
-            yield* debounced.trigger(state.history);
+            yield* debounced.trigger({ history: state.history, systemPrompt: state.systemPrompt });
           }),
         ),
       );

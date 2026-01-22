@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { EventInput, EventType, Offset, Payload } from "./domain.js";
 import { ConfigSetEvent, EventSchema, UserMessageEvent } from "./events.js";
 import {
+  LlmLoopActivatedEvent,
   RequestEndedEvent,
-  RequestStartedEvent,
   ResponseSseEvent,
 } from "./processors/llm-loop/events.js";
 
@@ -43,9 +43,9 @@ describe("EventSchema", () => {
     });
 
     it("allows omitting payload for empty schemas", () => {
-      const event = RequestStartedEvent.make();
+      const event = LlmLoopActivatedEvent.make();
 
-      expect(event.type).toBe("iterate:llm-loop:request-started");
+      expect(event.type).toBe("iterate:llm-loop:activated");
       expect(event.payload).toEqual({});
     });
   });
@@ -86,7 +86,7 @@ describe("EventSchema", () => {
       const events = [
         UserMessageEvent.make({ content: "Hello" }),
         ConfigSetEvent.make({ model: "grok" }),
-        RequestStartedEvent.make(),
+        LlmLoopActivatedEvent.make(),
       ];
 
       const results: string[] = [];
@@ -96,12 +96,12 @@ describe("EventSchema", () => {
           results.push(`user: ${event.payload.content}`);
         } else if (ConfigSetEvent.is(event)) {
           results.push(`config: ${event.payload.model}`);
-        } else if (RequestStartedEvent.is(event)) {
-          results.push("started");
+        } else if (LlmLoopActivatedEvent.is(event)) {
+          results.push("activated");
         }
       }
 
-      expect(results).toEqual(["user: Hello", "config: grok", "started"]);
+      expect(results).toEqual(["user: Hello", "config: grok", "activated"]);
     });
   });
 
