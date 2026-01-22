@@ -4,7 +4,7 @@
  * Boot: reads history → reduces to derived state (current offset)
  * EventStream owns offset management, storage is dumb (just persists Events)
  */
-import { DateTime, Effect, PubSub, Ref, Schema, Stream } from "effect";
+import { DateTime, Effect, PubSub, Schema, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
@@ -72,31 +72,27 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
     const subscribe = (options?: { from?: Offset }) =>
       Stream.unwrapScoped(
         Effect.gen(function* () {
-          const from = options?.from ?? Offset.make("-1");
+          let lastOffset = options?.from ?? Offset.make("-1");
 
           // Subscribe to PubSub first (don't miss events during history replay)
           const queue = yield* PubSub.subscribe(pubsub);
           const liveStream = Stream.fromQueue(queue);
 
-          const historicalStream = storage.read({ from });
-          const lastOffsetRef = yield* Ref.make<Offset>(from);
+          const historicalStream = storage.read({ from: lastOffset });
 
           // Track last historical offset, then filter live to only new events
           const trackedHistorical = historicalStream.pipe(
-            Stream.tap((event) => Ref.set(lastOffsetRef, event.offset)),
+            Stream.tap((event) => Effect.sync(() => (lastOffset = event.offset))),
           );
 
           const dedupedLive = liveStream.pipe(
-            Stream.filterEffect((event) =>
-              Ref.modify(lastOffsetRef, (lastOffset) => {
-                if (Offset.gt(event.offset, lastOffset)) {
-                  const result: readonly [boolean, Offset] = [true, event.offset];
-                  return result;
-                }
-                const result: readonly [boolean, Offset] = [false, lastOffset];
-                return result;
-              }),
-            ),
+            Stream.filter((event) => {
+              if (Offset.gt(event.offset, lastOffset)) {
+                lastOffset = event.offset;
+                return true;
+              }
+              return false;
+            }),
           );
 
           return Stream.concat(trackedHistorical, dedupedLive);
