@@ -1,7 +1,7 @@
 /**
  * Live implementation of StreamManager
  */
-import { Effect, Layer, PubSub, Stream, SynchronizedRef } from "effect";
+import { Effect, Layer, PubSub, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorageManager } from "../stream-storage/service.js";
@@ -16,7 +16,7 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
   StreamManager,
   Effect.gen(function* () {
     const storageManager = yield* StreamStorageManager;
-    const streamsRef = yield* SynchronizedRef.make(new Map<StreamPath, EventStream.EventStream>());
+    const streams = new Map<StreamPath, EventStream.EventStream>();
 
     // Global PubSub for all events (used for "all paths" subscriptions)
     const globalPubSub = yield* PubSub.unbounded<Event>();
@@ -24,29 +24,13 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
     const getOrCreateStream = Effect.fn("StreamManager.getOrCreateStream")(function* (
       path: StreamPath,
     ) {
-      return yield* SynchronizedRef.modifyEffect(streamsRef, (streams) => {
-        const existing = streams.get(path);
-        if (existing) {
-          const result: readonly [
-            EventStream.EventStream,
-            Map<StreamPath, EventStream.EventStream>,
-          ] = [existing, streams];
-          return Effect.succeed(result);
-        }
+      const existing = streams.get(path);
+      if (existing) return existing;
 
-        // Create path-scoped storage and wrap with EventStream
-        const storage = storageManager.forPath(path);
-        return EventStream.make(storage, path).pipe(
-          Effect.map((stream) => {
-            streams.set(path, stream);
-            const result: readonly [
-              EventStream.EventStream,
-              Map<StreamPath, EventStream.EventStream>,
-            ] = [stream, streams];
-            return result;
-          }),
-        );
-      });
+      const storage = storageManager.forPath(path);
+      const stream = yield* EventStream.make(storage, path);
+      streams.set(path, stream);
+      return stream;
     });
 
     const forPath = (path: StreamPath) => getOrCreateStream(path);
