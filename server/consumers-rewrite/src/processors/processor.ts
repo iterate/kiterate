@@ -8,7 +8,7 @@
  * subscribe({}), a processor is spawned for that path. The processor then uses
  * its EventStream to read history and subscribe to live events.
  */
-import { Effect, FiberMap, Layer, Scope, Stream } from "effect";
+import { Deferred, Effect, FiberMap, Layer, Scope, Stream } from "effect";
 
 import { StreamPath } from "../domain.js";
 import { EventStream, StreamManager } from "../services/stream-manager/index.js";
@@ -43,11 +43,13 @@ export const toLayer = <R>(
       const streamManager = yield* StreamManager;
       const context = yield* Effect.context<Exclude<R, Scope.Scope>>();
       const processors = yield* FiberMap.make<StreamPath>();
+      const started = yield* Deferred.make<void>();
 
       yield* Effect.log("starting");
 
       // Watch for events and start processors lazily
       yield* streamManager.subscribe({}).pipe(
+        Stream.onStart(Deferred.succeed(started, void 0)),
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             const stream = yield* streamManager.forPath(event.path);
@@ -67,5 +69,8 @@ export const toLayer = <R>(
         Effect.catchAllCause((cause) => Effect.logError("watch failed", cause)),
         Effect.forkScoped,
       );
+
+      // Ensure subscription is active before returning (useful for tests)
+      yield* Deferred.await(started);
     }).pipe(Effect.annotateLogs("processor", processor.name)),
   );

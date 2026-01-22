@@ -4,9 +4,12 @@
  * Tests the FiberMap-based lazy processor spawning behavior.
  */
 import { describe, it, expect } from "@effect/vitest";
-import { Effect, FiberMap, Ref } from "effect";
+import { Context, Deferred, Effect, FiberMap, Layer, Ref } from "effect";
 
-import { StreamPath } from "../domain.js";
+import { EventInput, EventType, StreamPath } from "../domain.js";
+import * as StreamManager from "../services/stream-manager/index.js";
+import * as StreamStorage from "../services/stream-storage/index.js";
+import { toLayer } from "./processor.js";
 
 describe("Processor toLayer", () => {
   it.scoped("FiberMap.run with onlyIfMissing prevents duplicate processors", () =>
@@ -67,8 +70,42 @@ describe("Processor toLayer", () => {
     }),
   );
 
-  // Note: Integration test with StreamManager.subscribe({}) omitted due to
-  // inherent race condition with lazy streams. The PubSub subscription happens
-  // when the stream starts consuming, which races with event publishing.
-  // In production, this works because events flow continuously.
+  it.scoped("toLayer starts processor after subscription is active", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const startCount = yield* Ref.make(0);
+
+      const processor = {
+        name: "test-processor",
+        run: (_stream: StreamManager.EventStream.EventStream) =>
+          Effect.gen(function* () {
+            const count = yield* Ref.updateAndGet(startCount, (n) => n + 1);
+            if (count === 1) {
+              yield* Deferred.succeed(started, void 0);
+            }
+            return yield* Effect.never;
+          }),
+      };
+
+      const streamManagerLayer = StreamManager.liveLayer.pipe(
+        Layer.provide(StreamStorage.inMemoryLayer),
+      );
+
+      const processorLayer = toLayer(processor).pipe(Layer.provide(streamManagerLayer));
+
+      const appLayer = Layer.merge(streamManagerLayer, processorLayer);
+      const env = yield* Layer.build(appLayer);
+      const manager = Context.get(env, StreamManager.StreamManager);
+
+      yield* manager.append({
+        path: StreamPath.make("test/ready"),
+        event: EventInput.make({ type: EventType.make("test"), payload: { ok: true } }),
+      });
+
+      yield* Deferred.await(started);
+
+      const count = yield* Ref.get(startCount);
+      expect(count).toBe(1);
+    }),
+  );
 });
