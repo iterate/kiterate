@@ -6,8 +6,8 @@ import { Chunk, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 
 import { EventInput, EventType, Offset, StreamPath } from "../../domain.js";
 import * as StreamStorage from "../stream-storage/index.js";
-import * as StreamManager from "./index.js";
 import { liveLayer } from "./live.js";
+import * as StreamManager from "./index.js";
 
 const testLayer = liveLayer.pipe(Layer.provide(StreamStorage.inMemoryLayer));
 

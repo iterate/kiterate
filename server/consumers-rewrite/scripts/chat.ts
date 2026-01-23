@@ -5,8 +5,8 @@
  * Usage: bun scripts/chat.ts <path>
  * Example: bun scripts/chat.ts hello5
  */
-import * as YAML from "yaml";
 import { readFileSync } from "fs";
+import * as YAML from "yaml";
 
 const path = process.argv[2];
 if (!path) {
