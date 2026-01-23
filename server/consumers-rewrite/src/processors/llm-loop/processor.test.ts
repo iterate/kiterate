@@ -4,7 +4,7 @@ import { Option } from "effect";
 import { Duration, Effect, TestClock } from "effect";
 
 import { StreamPath } from "../../domain.js";
-import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
+import { CancelRequestEvent, ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { TestLanguageModel, makeTestEventStream } from "../../testing/index.js";
 import {
   RequestCancelledEvent,
@@ -281,6 +281,128 @@ describe("LlmLoopProcessor", () => {
       expect(systemMsg?.content).toContain("helpful assistant");
 
       yield* lm.complete();
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("queue mode waits for current response to finish before triggering", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Send first message (default interrupt mode)
+      yield* stream.append(UserMessageEvent.make({ content: "First message" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+      yield* lm.waitForCall();
+
+      const firstRequest = yield* stream.waitForEvent(RequestStartedEvent);
+
+      // Start responding
+      yield* lm.emit(Response.textDeltaPart({ id: "msg1", delta: "Working on it..." }));
+
+      // Send queued message - should NOT interrupt
+      yield* stream.append(UserMessageEvent.make({ content: "Queued message", mode: "queue" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+
+      // First request should still be running (no interruption or cancellation)
+      const events = yield* stream.getEvents();
+      expect(events.filter(RequestInterruptedEvent.is)).toHaveLength(0);
+      expect(events.filter(RequestCancelledEvent.is)).toHaveLength(0);
+
+      // Complete first request
+      yield* lm.complete();
+      yield* stream.waitForEvent(RequestEndedEvent);
+
+      // Now second request should start automatically
+      yield* TestClock.adjust(llmDebounce.duration);
+      yield* lm.waitForCall();
+
+      const secondRequest = yield* stream.waitForEvent(RequestStartedEvent);
+      expect(secondRequest.offset).not.toBe(firstRequest.offset);
+
+      yield* lm.complete();
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("background mode adds to history without triggering response", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Send background message - should NOT trigger LLM
+      yield* stream.append(
+        UserMessageEvent.make({ content: "Background context", mode: "background" }),
+      );
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+      yield* TestClock.adjust(llmDebounce.maxWait);
+
+      // No request should have started
+      const events = yield* stream.getEvents();
+      expect(events.filter(RequestStartedEvent.is)).toHaveLength(0);
+
+      // Now send a normal message - it should include the background message in history
+      yield* stream.append(UserMessageEvent.make({ content: "Now respond" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+
+      const call = yield* lm.waitForCall();
+      const prompt = call.prompt as Array<{ role: string; content: string }>;
+
+      // History should include both messages
+      const userMessages = prompt.filter((m) => m.role === "user");
+      expect(userMessages).toHaveLength(2);
+      expect(userMessages[0]?.content).toBe("Background context");
+      expect(userMessages[1]?.content).toBe("Now respond");
+
+      yield* lm.complete();
+    }).pipe(Effect.provide(TestLanguageModel.layer)),
+  );
+
+  it.scoped("CancelRequestEvent stops current response without triggering new one", () =>
+    Effect.gen(function* () {
+      const lm = yield* TestLanguageModel;
+      const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
+      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
+      yield* stream.waitForSubscribe();
+
+      // Start a request
+      yield* stream.append(UserMessageEvent.make({ content: "Hello" }));
+      yield* Effect.yieldNow();
+      yield* TestClock.adjust(llmDebounce.duration);
+      yield* lm.waitForCall();
+
+      const request = yield* stream.waitForEvent(RequestStartedEvent);
+
+      // Start responding
+      yield* lm.emit(Response.textDeltaPart({ id: "msg1", delta: "Starting..." }));
+
+      // Cancel the request
+      yield* stream.append(CancelRequestEvent.make());
+      yield* Effect.yieldNow();
+
+      // Should see interrupted event
+      const interrupted = yield* stream.waitForEvent(RequestInterruptedEvent);
+      expect(interrupted.payload.requestOffset).toBe(request.offset);
+
+      // Wait - no new request should start
+      yield* TestClock.adjust(llmDebounce.duration);
+      yield* TestClock.adjust(llmDebounce.maxWait);
+
+      const events = yield* stream.getEvents();
+      // Only one request started (the original)
+      expect(events.filter(RequestStartedEvent.is)).toHaveLength(1);
     }).pipe(Effect.provide(TestLanguageModel.layer)),
   );
 });

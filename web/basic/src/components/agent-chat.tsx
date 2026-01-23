@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon } from "lucide-react";
+import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon, SquareIcon } from "lucide-react";
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
@@ -23,7 +23,9 @@ import {
   sendRawJson,
   sendAudio,
   sendConfigEvent,
+  sendCancelRequest,
   type AiModelType,
+  type UserMessageMode,
 } from "@/lib/agent-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -157,6 +159,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [selectedRawEventIndex, setSelectedRawEventIndex] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("message");
   const [aiModel, setAiModel] = useState<AiModelType | null>(null);
+  const [messageMode, setMessageMode] = useState<UserMessageMode>("interrupt");
   const { displayMode, setRawEventsCount } = useRawMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -275,6 +278,19 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     }
   };
 
+  // Handle stop button - sends cancel request
+  const handleStop = async () => {
+    setSendError(null);
+    try {
+      const result = await sendCancelRequest(apiURL, agentPath);
+      if (!result.ok) {
+        setSendError(result.error ?? "Failed to cancel request");
+      }
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Failed to cancel request");
+    }
+  };
+
   const handleSubmit = async ({ text }: { text: string }) => {
     if (sending) return;
     setSendError(null);
@@ -293,7 +309,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
         const trimmedText = text.trim();
         if (!trimmedText) return;
         setSending(true);
-        const result = await sendMessage(apiURL, agentPath, trimmedText);
+        const result = await sendMessage(apiURL, agentPath, trimmedText, messageMode);
         if (!result.ok) {
           setSendError(result.error ?? "Failed to send message");
         }
@@ -413,10 +429,30 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
                 Grok
               </Button>
             </div>
+            <Select value={messageMode} onValueChange={(v) => setMessageMode(v as UserMessageMode)}>
+              <SelectTrigger className="h-8 w-[120px] text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="interrupt">Interrupt</SelectItem>
+                <SelectItem value="queue">Queue</SelectItem>
+                <SelectItem value="background">Context</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-center gap-2">
             {isStreaming && (
               <div className="flex items-center gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 text-xs gap-1"
+                  onClick={handleStop}
+                  title="Stop current response"
+                >
+                  <SquareIcon className="size-3" />
+                  Stop
+                </Button>
                 <Loader size={14} />
                 <Badge variant="secondary" className="animate-pulse">
                   Streaming

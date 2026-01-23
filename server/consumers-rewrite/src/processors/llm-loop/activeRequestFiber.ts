@@ -8,6 +8,8 @@ export type ActiveRequestFiber = {
     requestOffset: Offset,
     effect: Effect.Effect<void, never, R>,
   ) => Effect.Effect<Option.Option<Offset>, never, R>;
+  /** Interrupt the current request without starting a new one */
+  readonly interruptOnly: () => Effect.Effect<void>;
   readonly currentOffset: Option.Option<Offset>;
 };
 
@@ -38,8 +40,15 @@ export const makeActiveRequestFiber = (): Effect.Effect<ActiveRequestFiber, neve
         return previous;
       });
 
+    const interruptOnly = () =>
+      Effect.gen(function* () {
+        yield* FiberMap.clear(map);
+        currentOffset = Option.none();
+      });
+
     return {
       run,
+      interruptOnly,
       get currentOffset() {
         return currentOffset;
       },

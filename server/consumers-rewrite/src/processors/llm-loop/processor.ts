@@ -12,7 +12,7 @@ import { Cause, Duration, Effect, Exit, Option, Schema, Stream } from "effect";
 
 import dedent from "dedent";
 import { Event, Offset } from "../../domain.js";
-import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
+import { CancelRequestEvent, ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
 import { withTraceFromEvent } from "../../tracing/helpers.js";
@@ -47,6 +47,8 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   llmLastRespondedAt: Schema.Option(Offset),
   /** Current system prompt (built from edits) */
   systemPrompt: Schema.String,
+  /** Whether there's a queued message waiting for the current response to finish */
+  pendingQueuedResponse: Schema.Boolean,
 }) {
   static initial = State.make({
     enabled: false,
@@ -55,6 +57,7 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
     llmRequestRequiredFrom: Option.none(),
     llmLastRespondedAt: Option.none(),
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    pendingQueuedResponse: false,
   });
 
   /** Create a new State with the given updates */
@@ -117,17 +120,37 @@ const reduce = (state: State, event: Event): State => {
     return state.with({ systemPrompt: newPrompt });
   }
 
-  // User message - add to history and mark offset as pending
+  // User message - add to history and handle mode
   if (UserMessageEvent.is(event)) {
-    return state.with({
+    const mode = event.payload.mode ?? "interrupt";
+    const newState = state.with({
       history: [...state.history, { role: "user", content: event.payload.content }],
-      llmRequestRequiredFrom: Option.some(event.offset),
     });
+
+    switch (mode) {
+      case "interrupt":
+        return newState.with({
+          llmRequestRequiredFrom: Option.some(event.offset),
+          pendingQueuedResponse: false,
+        });
+      case "queue":
+        return newState.with({ pendingQueuedResponse: true });
+      case "background":
+        return newState;
+    }
   }
 
   // Request started - track that we've responded to the current user message
   if (RequestStartedEvent.is(event)) {
     return state.with({ llmLastRespondedAt: Option.some(event.offset) });
+  }
+
+  // Request ended - trigger queued response if pending
+  if (RequestEndedEvent.is(event) && state.pendingQueuedResponse) {
+    return state.with({
+      llmRequestRequiredFrom: Option.some(event.offset),
+      pendingQueuedResponse: false,
+    });
   }
 
   // Request cancelled due to interrupt - mark the partial response so LLM knows it was cut off
@@ -243,6 +266,20 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
       yield* stream.subscribe({ from: state.lastOffset }).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
+            // Handle cancel request - interrupt current response without triggering new one
+            if (CancelRequestEvent.is(event)) {
+              const currentOffset = activeRequestFiber.currentOffset;
+              if (Option.isSome(currentOffset)) {
+                yield* activeRequestFiber.interruptOnly();
+                yield* stream.append(
+                  RequestInterruptedEvent.make({
+                    requestOffset: currentOffset.value,
+                  }),
+                );
+              }
+              return;
+            }
+
             state = reduce(state, event);
 
             // !enabled only blocks future triggers; pending debounced runs still execute.

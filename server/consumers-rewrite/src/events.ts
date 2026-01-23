@@ -85,8 +85,14 @@ export const ConfigSetEvent = EventSchema.make("iterate:agent:config:set", {
 
 export const UserMessageEvent = EventSchema.make("iterate:agent:action:send-user-message:called", {
   content: Schema.String,
+  mode: Schema.optional(Schema.Literal("interrupt", "queue", "background")),
 });
 export type UserMessageEvent = typeof UserMessageEvent.Type;
+
+export const CancelRequestEvent = EventSchema.make(
+  "iterate:agent:action:cancel-request:called",
+  {},
+);
 
 export const UserAudioEvent = EventSchema.make("iterate:agent:action:send-user-audio:called", {
   audio: Schema.String,

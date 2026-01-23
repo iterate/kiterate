@@ -1,10 +1,21 @@
+/** User message mode - controls how the message affects in-flight responses */
+export type UserMessageMode = "interrupt" | "queue" | "background";
+
 /** Event envelope for user messages sent to agents */
 export interface UserMessageEvent {
   type: "iterate:agent:action:send-user-message:called";
   version: 1;
   createdAt?: string; // Optional - server will set if not provided
   eventStreamId: string;
-  payload: { content: string };
+  payload: { content: string; mode?: UserMessageMode };
+}
+
+/** Event to cancel the current request */
+export interface CancelRequestEvent {
+  type: "iterate:agent:action:cancel-request:called";
+  version: 1;
+  eventStreamId: string;
+  payload: Record<string, never>;
 }
 
 /** Result of an API operation */
@@ -29,12 +40,26 @@ export function buildAgentURL(apiURL: string, agentPath: string): string {
 }
 
 /** Create a user message event envelope (createdAt is set by server) */
-export function createMessageEvent(agentPath: string, text: string): UserMessageEvent {
+export function createMessageEvent(
+  agentPath: string,
+  text: string,
+  mode?: UserMessageMode,
+): UserMessageEvent {
   return {
     type: "iterate:agent:action:send-user-message:called",
     version: 1,
     eventStreamId: agentPath,
-    payload: { content: text },
+    payload: mode ? { content: text, mode } : { content: text },
+  };
+}
+
+/** Create a cancel request event */
+export function createCancelEvent(agentPath: string): CancelRequestEvent {
+  return {
+    type: "iterate:agent:action:cancel-request:called",
+    version: 1,
+    eventStreamId: agentPath,
+    payload: {},
   };
 }
 
@@ -65,9 +90,16 @@ export async function sendMessage(
   apiURL: string,
   agentPath: string,
   text: string,
+  mode?: UserMessageMode,
 ): Promise<ApiResult> {
-  const event = createMessageEvent(agentPath, text);
+  const event = createMessageEvent(agentPath, text, mode);
   return sendRawJson(apiURL, agentPath, JSON.stringify(event, null, 2));
+}
+
+/** Send a cancel request to stop the current response */
+export async function sendCancelRequest(apiURL: string, agentPath: string): Promise<ApiResult> {
+  const event = createCancelEvent(agentPath);
+  return sendRawJson(apiURL, agentPath, JSON.stringify(event));
 }
 
 /** Audio input event for voice agents */
