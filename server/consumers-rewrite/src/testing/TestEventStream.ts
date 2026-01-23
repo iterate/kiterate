@@ -1,5 +1,5 @@
 /**
- * TestSimpleStream - a mock EventStream for testing
+ * TestEventStream - a mock EventStream for testing
  *
  * Extends EventStream with test control methods for inspecting events,
  * waiting for subscription, and waiting for specific event types.
@@ -7,10 +7,11 @@
  * The wait methods consume events - each call returns the *next* matching event,
  * not one that was already returned by a previous wait.
  */
-import { DateTime, Deferred, Duration, Effect, Queue, Scope, Stream } from "effect";
+import { DateTime, Deferred, Duration, Effect, Option, Queue, Scope, Stream } from "effect";
 
 import { Event, EventInput, EventType, Offset, StreamPath } from "../domain.js";
 import { EventStream } from "../services/stream-manager/index.js";
+import { SpanId, TraceContext, TraceId } from "../tracing/traceContext.js";
 
 /** Default timeout for wait operations */
 const DEFAULT_TIMEOUT = Duration.millis(300);
@@ -74,6 +75,16 @@ export const makeTestEventStream = (
     >();
 
     let nextOffset = 0;
+    let nextSpanId = 0;
+
+    // Generate deterministic test trace context
+    const testTraceId = TraceId.make(`test-trace-${path}`);
+    const makeTestTrace = (): TraceContext =>
+      TraceContext.make({
+        traceId: testTraceId,
+        spanId: SpanId.make(`test-span-${nextSpanId++}`),
+        parentSpanId: Option.none(),
+      });
 
     const makeEvent = (input: EventInput): Event =>
       Event.make({
@@ -81,6 +92,7 @@ export const makeTestEventStream = (
         path,
         offset: Offset.make(String(nextOffset++).padStart(16, "0")),
         createdAt: DateTime.unsafeNow(),
+        trace: makeTestTrace(),
       });
 
     const notifyWaiters = (event: Event) =>
@@ -209,7 +221,3 @@ export const makeTestEventStream = (
       waitForEventCount: waitForEvents,
     };
   });
-
-// Aliases for backward compatibility
-export { makeTestEventStream as makeTestSimpleStream };
-export type { TestEventStream as TestSimpleStream };

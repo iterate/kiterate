@@ -20,6 +20,7 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
+import { withTraceFromEvent } from "../../tracing/helpers.js";
 import {
   LlmLoopActivatedEvent,
   RequestEndedEvent,
@@ -386,7 +387,9 @@ export const CodemodeProcessor: Processor<never> = {
               yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
 
               // Run the evaluation (this is async/Promise-based)
-              const result = yield* Effect.promise(() => executeCode(code));
+              const result = yield* Effect.promise(() => executeCode(code)).pipe(
+                Effect.withSpan("codemode.eval"),
+              );
 
               if (result.output.success) {
                 yield* stream.append(
@@ -426,7 +429,7 @@ export const CodemodeProcessor: Processor<never> = {
                 yield* stream.append(UserMessageEvent.make({ content: summary }));
               }
             }
-          }),
+          }).pipe(withTraceFromEvent(event)),
         ),
       );
     }),

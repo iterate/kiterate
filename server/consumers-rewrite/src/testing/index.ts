@@ -1,2 +1,2 @@
+export * from "./TestEventStream.js";
 export * from "./TestLanguageModel.js";
-export * from "./TestSimpleStream.js";

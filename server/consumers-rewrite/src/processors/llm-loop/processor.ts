@@ -15,6 +15,7 @@ import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
 import { makeActiveRequestFiber } from "./activeRequestFiber.js";
+import { withTraceFromEvent } from "../../tracing/helpers.js";
 import {
   LlmLoopActivatedEvent,
   RequestCancelledEvent,
@@ -239,7 +240,7 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
               }),
             );
           }
-        });
+        }).pipe(Effect.withSpan("llm-loop.request"));
 
       const debounced = yield* makeDebounced(startRequest, llmDebounce);
 
@@ -269,8 +270,11 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
             if (!state.enabled) return;
             if (!state.shouldTriggerLlmResponse) return;
 
-            yield* debounced.trigger({ history: state.history, systemPrompt: state.systemPrompt });
-          }),
+            yield* debounced.trigger({
+              history: state.history,
+              systemPrompt: state.systemPrompt,
+            });
+          }).pipe(withTraceFromEvent(event)),
         ),
       );
     }),

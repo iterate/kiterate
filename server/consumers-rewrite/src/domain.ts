@@ -3,6 +3,8 @@
  */
 import { Schema } from "effect";
 
+import { TraceContext } from "./tracing/traceContext.js";
+
 // -------------------------------------------------------------------------------------
 // Branded primitives
 // -------------------------------------------------------------------------------------
@@ -61,4 +63,5 @@ export class Event extends EventInput.extend<Event>("Event")({
   path: StreamPath,
   offset: Offset,
   createdAt: Schema.DateTimeUtc,
+  trace: TraceContext,
 }) {}
