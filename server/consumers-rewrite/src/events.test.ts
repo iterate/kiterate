@@ -2,11 +2,7 @@ import { Effect, Option, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { EventInput, EventType, Offset, Payload } from "./domain.js";
 import { ConfigSetEvent, EventSchema, UserMessageEvent } from "./events.js";
-import {
-  LlmLoopActivatedEvent,
-  RequestEndedEvent,
-  ResponseSseEvent,
-} from "./processors/llm-loop/events.js";
+import { RequestEndedEvent, ResponseSseEvent } from "./processors/llm-loop/events.js";
 
 describe("EventSchema", () => {
   // ---------------------------------------------------------------------------
@@ -43,9 +39,10 @@ describe("EventSchema", () => {
     });
 
     it("allows omitting payload for empty schemas", () => {
-      const event = LlmLoopActivatedEvent.make();
+      const EmptyEvent = EventSchema.make("test:empty", {});
+      const event = EmptyEvent.make();
 
-      expect(event.type).toBe("iterate:llm-loop:activated");
+      expect(event.type).toBe("test:empty");
       expect(event.payload).toEqual({});
     });
   });
@@ -86,7 +83,7 @@ describe("EventSchema", () => {
       const events = [
         UserMessageEvent.make({ content: "Hello" }),
         ConfigSetEvent.make({ model: "grok" }),
-        LlmLoopActivatedEvent.make(),
+        RequestEndedEvent.make({ requestOffset: Offset.make("0000000000000001") }),
       ];
 
       const results: string[] = [];
@@ -96,12 +93,12 @@ describe("EventSchema", () => {
           results.push(`user: ${event.payload.content}`);
         } else if (ConfigSetEvent.is(event)) {
           results.push(`config: ${event.payload.model}`);
-        } else if (LlmLoopActivatedEvent.is(event)) {
-          results.push("activated");
+        } else if (RequestEndedEvent.is(event)) {
+          results.push("ended");
         }
       }
 
-      expect(results).toEqual(["user: Hello", "config: grok", "activated"]);
+      expect(results).toEqual(["user: Hello", "config: grok", "ended"]);
     });
   });
 

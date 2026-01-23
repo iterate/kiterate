@@ -21,12 +21,7 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
-import {
-  LlmLoopActivatedEvent,
-  RequestEndedEvent,
-  ResponseSseEvent,
-  SystemPromptEditEvent,
-} from "../llm-loop/events.js";
+import { RequestEndedEvent, ResponseSseEvent, SystemPromptEditEvent } from "../llm-loop/events.js";
 import {
   CodeBlockAddedEvent,
   CodeEvalDoneEvent,
@@ -144,7 +139,7 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
   pendingEvaluation: Schema.Array(RequestId),
   /** Request IDs currently being evaluated */
   inProgress: Schema.Array(RequestId),
-  /** Whether we've emitted the system prompt edit for the current activation */
+  /** Whether we've emitted the system prompt edit */
   systemPromptEmitted: Schema.Boolean,
 }) {
   static initial = State.make({
@@ -361,9 +356,8 @@ export const CodemodeProcessor: Processor<never> = {
             const prevState = state;
             state = reduce(state, event);
 
-            // When LLM loop is activated, emit our system prompt edit
-            if (LlmLoopActivatedEvent.is(event) && !state.systemPromptEmitted) {
-              yield* Effect.log("emitting codemode system prompt");
+            // Emit system prompt on every event if not yet emitted
+            if (!state.systemPromptEmitted) {
               yield* stream.append(
                 SystemPromptEditEvent.make({
                   mode: "append",
@@ -371,8 +365,6 @@ export const CodemodeProcessor: Processor<never> = {
                   source: Option.some("codemode"),
                 }),
               );
-              // Mark as emitted locally (reducer will also see our event on replay)
-              state = State.make({ ...state, systemPromptEmitted: true });
             }
 
             // When an LLM request ends, parse for codemode blocks

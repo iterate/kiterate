@@ -44,13 +44,6 @@ export const RequestInterruptedEvent = EventSchema.make("iterate:llm-loop:reques
 });
 
 // -------------------------------------------------------------------------------------
-// Activation Event
-// -------------------------------------------------------------------------------------
-
-/** Emitted when the LLM loop processor is activated (e.g., when a model is configured) */
-export const LlmLoopActivatedEvent = EventSchema.make("iterate:llm-loop:activated", {});
-
-// -------------------------------------------------------------------------------------
 // System Prompt Events
 // -------------------------------------------------------------------------------------
 

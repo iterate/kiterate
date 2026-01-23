@@ -7,7 +7,6 @@ import { StreamPath } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { TestLanguageModel, makeTestEventStream } from "../../testing/index.js";
 import {
-  LlmLoopActivatedEvent,
   RequestCancelledEvent,
   RequestEndedEvent,
   RequestInterruptedEvent,
@@ -182,23 +181,6 @@ describe("LlmLoopProcessor", () => {
     }).pipe(Effect.provide(TestLanguageModel.layer)),
   );
 
-  it.scoped("emits LlmLoopActivatedEvent when model is configured", () =>
-    Effect.gen(function* () {
-      const stream = yield* makeTestEventStream(StreamPath.make("test"));
-
-      yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
-      yield* stream.waitForSubscribe();
-
-      // Configure openai model
-      yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
-      yield* Effect.yieldNow();
-
-      // Should emit activated event
-      const activated = yield* stream.waitForEvent(LlmLoopActivatedEvent);
-      expect(activated).toBeDefined();
-    }).pipe(Effect.provide(TestLanguageModel.layer)),
-  );
-
   it.scoped("handles SystemPromptEditEvent with append mode", () =>
     Effect.gen(function* () {
       const lm = yield* TestLanguageModel;
@@ -207,10 +189,6 @@ describe("LlmLoopProcessor", () => {
       yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
-
-      // Allow processor to run through event loop
-      yield* Effect.yieldNow();
-      yield* stream.waitForEvent(LlmLoopActivatedEvent);
 
       // Append to system prompt
       yield* stream.append(
@@ -248,10 +226,6 @@ describe("LlmLoopProcessor", () => {
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
 
-      // Allow processor to run through event loop
-      yield* Effect.yieldNow();
-      yield* stream.waitForEvent(LlmLoopActivatedEvent);
-
       // Replace system prompt entirely
       yield* stream.append(
         SystemPromptEditEvent.make({
@@ -284,10 +258,6 @@ describe("LlmLoopProcessor", () => {
       yield* stream.append(ConfigSetEvent.make({ model: "openai" }));
       yield* LlmLoopProcessor.run(stream).pipe(Effect.forkScoped);
       yield* stream.waitForSubscribe();
-
-      // Allow processor to run through event loop
-      yield* Effect.yieldNow();
-      yield* stream.waitForEvent(LlmLoopActivatedEvent);
 
       // Prepend to system prompt
       yield* stream.append(
