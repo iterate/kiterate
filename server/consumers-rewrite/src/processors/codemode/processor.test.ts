@@ -444,6 +444,9 @@ it.scoped("registers a tool and makes it available in codemode", () =>
     expect(toolPrompt.payload.content).toContain("Tool: add");
     expect(toolPrompt.payload.content).toContain("Adds two numbers");
     expect(toolPrompt.payload.content).toContain("await add(");
+    // Should include TypeScript signature
+    expect(toolPrompt.payload.content).toContain("TypeScript Signature:");
+    expect(toolPrompt.payload.content).toContain("add(params:");
 
     // Now use the tool in a codemode block
     const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));

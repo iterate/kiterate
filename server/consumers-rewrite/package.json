@@ -23,6 +23,8 @@
     "dedent": "^1.7.1",
     "effect": "^3.19.14",
     "execa": "^9.6.1",
+    "json-schema-to-ts": "^3.1.1",
+    "json-schema-to-typescript": "^15.0.4",
     "tinyexec": "^1.0.2",
     "ws": "^8.19.0",
     "yaml": "^2.8.2"

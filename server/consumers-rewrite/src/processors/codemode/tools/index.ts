@@ -16,3 +16,11 @@ export {
 // Types and utilities
 export { defineTool, toJsonSchema, toolDefinitionToMeta, RegisteredToolMeta } from "./types.js";
 export type { ToolDefinition } from "./types.js";
+
+// TypeScript generation
+export {
+  jsonSchemaToTypeString,
+  jsonSchemaToTypeStringSync,
+  generateToolSignature,
+  generateToolsTypeBlock,
+} from "./typescript-gen.js";

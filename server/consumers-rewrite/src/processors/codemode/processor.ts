@@ -35,6 +35,7 @@ import {
 } from "./events.js";
 import { ToolRegistry } from "./tools/service.js";
 import { RegisteredToolMeta } from "./tools/types.js";
+import { generateToolSignature } from "./tools/typescript-gen.js";
 
 // -------------------------------------------------------------------------------------
 // Constants
@@ -105,32 +106,42 @@ const formatLogs = (logs: Array<LogEntry>): string => {
 
 /**
  * Generate a system prompt section for a registered tool.
+ * Includes a TypeScript function signature for better LLM understanding.
  */
-const generateToolPrompt = (tool: RegisteredToolMeta): string => {
-  const returnDesc = Option.isSome(tool.returnDescription)
-    ? `\n\n**Returns:** ${tool.returnDescription.value}`
-    : "";
+const generateToolPrompt = (tool: RegisteredToolMeta): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    // Generate TypeScript signature
+    const signature = yield* Effect.promise(() =>
+      generateToolSignature({
+        name: tool.name,
+        description: tool.description,
+        parametersJsonSchema: tool.parametersJsonSchema,
+        returnDescription: Option.isSome(tool.returnDescription)
+          ? tool.returnDescription.value
+          : undefined,
+      }),
+    );
 
-  return dedent`
-    ## Tool: ${tool.name}
+    return dedent`
+      ## Tool: ${tool.name}
 
-    ${tool.description}
+      ${tool.description}
 
-    **Parameters:**
-    \`\`\`json
-    ${JSON.stringify(tool.parametersJsonSchema, null, 2)}
-    \`\`\`${returnDesc}
+      **TypeScript Signature:**
+      \`\`\`typescript
+      ${signature}
+      \`\`\`
 
-    **Usage:**
-    \`\`\`
-    <codemode>
-    async function codemode() {
-      return await ${tool.name}({ /* params */ });
-    }
-    </codemode>
-    \`\`\`
-  `;
-};
+      **Usage:**
+      \`\`\`
+      <codemode>
+      async function codemode() {
+        return await ${tool.name}({ /* params */ });
+      }
+      </codemode>
+      \`\`\`
+    `;
+  });
 
 /**
  * Create a summary message for the LLM after code evaluation.
@@ -522,10 +533,11 @@ export const CodemodeProcessor: Processor<ToolRegistry> = {
                   const toolMeta = state.registeredTools.find((t) => t.name === toolName);
                   if (toolMeta) {
                     yield* Effect.log(`emitting system prompt for tool: ${toolName}`);
+                    const promptContent = yield* generateToolPrompt(toolMeta);
                     yield* stream.append(
                       SystemPromptEditEvent.make({
                         mode: "append",
-                        content: generateToolPrompt(toolMeta),
+                        content: promptContent,
                         source: Option.some(`codemode:tool:${toolName}`),
                       }),
                     );
