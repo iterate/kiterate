@@ -28,10 +28,15 @@ const OpenAiClientLive = OpenAiClient.layerConfig({
   apiKey: Config.redacted("OPENAI_API_KEY"),
 }).pipe(Layer.provide(FetchHttpClient.layer));
 
-// Language model using gpt-4o
-const LanguageModelLive = OpenAiLanguageModel.layer({ model: "gpt-4o" }).pipe(
-  Layer.provide(OpenAiClientLive),
-);
+// Language model using gpt-5-codex with low reasoning effort
+const LanguageModelLive = OpenAiLanguageModel.layer({
+  model: "gpt-5-codex",
+  config: {
+    reasoning: {
+      effort: "low",
+    },
+  },
+}).pipe(Layer.provide(OpenAiClientLive));
 
 // Processors (background processes that run with the server)
 const ProcessorsLive = Layer.mergeAll(LlmLoopProcessorLayer, CodemodeProcessorLayer);

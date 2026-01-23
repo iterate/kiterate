@@ -437,15 +437,7 @@ export const CodemodeProcessor: Processor<never> = {
                   // Append a synthetic user message to inform the LLM of the failure
                   const summary = createResultSummary(result);
                   yield* Effect.log(`appending codemode error result (${summary.length} chars)`);
-                  yield* stream.append(
-                    UserMessageEvent.make({
-                      content: dedent`
-                        <developer-message>
-                          ${summary}
-                        </developer-message>
-                      `,
-                    }),
-                  );
+                  yield* stream.append(UserMessageEvent.make({ content: summary }));
                 }
               }).pipe(withSpanFromEvent("codemode.eval", event));
             }
