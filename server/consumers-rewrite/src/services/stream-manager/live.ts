@@ -69,32 +69,14 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
       );
     };
 
-    const read = ({ path, from, to }: { path?: StreamPath; from?: Offset; to?: Offset }) =>
+    const read = ({ path, from, to }: { path: StreamPath; from?: Offset; to?: Offset }) =>
       Stream.unwrap(
         Effect.gen(function* () {
-          if (path !== undefined) {
-            // Single path read
-            const stream = yield* getOrCreateStream(path);
-            return stream.read({
-              ...(from !== undefined && { from }),
-              ...(to !== undefined && { to }),
-            });
-          }
-
-          // All paths read - historical only from storage
-          const afterOffset = from ?? Offset.make("-1");
-          const existingPaths = yield* storageManager.listPaths();
-
-          if (existingPaths.length === 0) {
-            return Stream.empty;
-          }
-
-          return Stream.mergeAll(
-            existingPaths.map((p) =>
-              storageManager.read({ path: p, from: afterOffset, ...(to !== undefined && { to }) }),
-            ),
-            { concurrency: "unbounded" },
-          );
+          const stream = yield* getOrCreateStream(path);
+          return stream.read({
+            ...(from !== undefined && { from }),
+            ...(to !== undefined && { to }),
+          });
         }).pipe(Effect.withSpan("StreamManager.read")),
       ).pipe(Stream.catchAllCause(() => Stream.empty));
 

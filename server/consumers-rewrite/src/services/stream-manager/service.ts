@@ -22,7 +22,7 @@ export class StreamManager extends Context.Tag("@app/StreamManager")<
 
     /** Read historical events, optionally within a range */
     readonly read: (input: {
-      path?: StreamPath;
+      path: StreamPath;
       from?: Offset;
       to?: Offset;
     }) => Stream.Stream<Event>;

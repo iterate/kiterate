@@ -5,21 +5,44 @@
  * Uses it.live + Effect.scoped to avoid scope interaction issues with Effect.sleep.
  */
 import { describe, it, expect } from "@effect/vitest";
-import { Deferred, Effect, flow, Layer, Ref } from "effect";
+import { Deferred, Effect, Layer, Ref } from "effect";
 
 import { EventInput, EventType, StreamPath } from "../domain.js";
 import * as StreamManager from "../services/stream-manager/index.js";
 import * as StreamStorage from "../services/stream-storage/index.js";
-import { Processor, toLayer } from "./processor.js";
+import { toLayer, type Processor } from "./processor.js";
 
 const TEST_TIMEOUT = "500 millis";
+const streamManagerLayer = StreamManager.liveLayer.pipe(Layer.provide(StreamStorage.inMemoryLayer));
+const testEventType = EventType.make("test");
 
-const baseLayer = StreamManager.liveLayer.pipe(Layer.provide(StreamStorage.inMemoryLayer));
+const makeTestLayer = (processor: Processor<never>) =>
+  Layer.merge(streamManagerLayer, toLayer(processor).pipe(Layer.provide(streamManagerLayer)));
 
-const withTestLayer = (processor: Processor<never>) => {
-  const TestLayer = Layer.merge(baseLayer, toLayer(processor).pipe(Layer.provide(baseLayer)));
-  return flow(Effect.scoped, Effect.provide(TestLayer), Effect.timeout(TEST_TIMEOUT));
-};
+const withTestLayer =
+  (processor: Processor<never>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    effect.pipe(
+      Effect.scoped,
+      Effect.provide(makeTestLayer(processor)),
+      Effect.timeout(TEST_TIMEOUT),
+    );
+
+const makeTestEvent = () => EventInput.make({ type: testEventType, payload: {} });
+
+const makeCountingProcessor = (
+  name: string,
+  startCount: Ref.Ref<number>,
+  onStart: (count: number) => Effect.Effect<void>,
+): Processor<never> => ({
+  name,
+  run: () =>
+    Effect.gen(function* () {
+      const count = yield* Ref.updateAndGet(startCount, (n) => n + 1);
+      yield* onStart(count);
+      return yield* Effect.never;
+    }),
+});
 
 describe("Processor toLayer", () => {
   it.live("starts processor when first event arrives", () =>
@@ -27,22 +50,16 @@ describe("Processor toLayer", () => {
       const started = yield* Deferred.make<void>();
       const startCount = yield* Ref.make(0);
 
-      const processor: Processor<never> = {
-        name: "start-test",
-        run: () =>
-          Effect.gen(function* () {
-            yield* Ref.update(startCount, (n) => n + 1);
-            yield* Deferred.succeed(started, void 0);
-            return yield* Effect.never;
-          }),
-      };
+      const processor = makeCountingProcessor("start-test", startCount, () =>
+        Deferred.succeed(started, void 0),
+      );
 
       yield* Effect.gen(function* () {
         const manager = yield* StreamManager.StreamManager;
 
         yield* manager.append({
           path: StreamPath.make("test/start"),
-          event: EventInput.make({ type: EventType.make("test"), payload: {} }),
+          event: makeTestEvent(),
         });
 
         yield* Deferred.await(started);
@@ -56,20 +73,14 @@ describe("Processor toLayer", () => {
       const started = yield* Deferred.make<void>();
       const startCount = yield* Ref.make(0);
 
-      const processor: Processor<never> = {
-        name: "dedup-test",
-        run: () =>
-          Effect.gen(function* () {
-            yield* Ref.update(startCount, (n) => n + 1);
-            yield* Deferred.succeed(started, void 0);
-            return yield* Effect.never;
-          }),
-      };
+      const processor = makeCountingProcessor("dedup-test", startCount, () =>
+        Deferred.succeed(started, void 0),
+      );
 
       yield* Effect.gen(function* () {
         const manager = yield* StreamManager.StreamManager;
         const path = StreamPath.make("test/dedup");
-        const event = EventInput.make({ type: EventType.make("test"), payload: {} });
+        const event = makeTestEvent();
 
         // First event starts the processor
         yield* manager.append({ path, event });
@@ -90,21 +101,13 @@ describe("Processor toLayer", () => {
       const startCount = yield* Ref.make(0);
       const twoStarted = yield* Deferred.make<void>();
 
-      const processor: Processor<never> = {
-        name: "multi-path-test",
-        run: () =>
-          Effect.gen(function* () {
-            const count = yield* Ref.updateAndGet(startCount, (n) => n + 1);
-            if (count >= 2) {
-              yield* Deferred.succeed(twoStarted, void 0);
-            }
-            return yield* Effect.never;
-          }),
-      };
+      const processor = makeCountingProcessor("multi-path-test", startCount, (count) =>
+        count >= 2 ? Deferred.succeed(twoStarted, void 0) : Effect.void,
+      );
 
       yield* Effect.gen(function* () {
         const manager = yield* StreamManager.StreamManager;
-        const event = EventInput.make({ type: EventType.make("test"), payload: {} });
+        const event = makeTestEvent();
 
         yield* manager.append({ path: StreamPath.make("test/a"), event });
         yield* manager.append({ path: StreamPath.make("test/b"), event });
