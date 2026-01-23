@@ -28,9 +28,9 @@ const OpenAiClientLive = OpenAiClient.layerConfig({
   apiKey: Config.redacted("OPENAI_API_KEY"),
 }).pipe(Layer.provide(FetchHttpClient.layer));
 
-// Language model using gpt-5-codex with low reasoning effort
+// Language model using gpt-5.2-codex with low reasoning effort
 const LanguageModelLive = OpenAiLanguageModel.layer({
-  model: "gpt-5-codex",
+  model: "gpt-5.2-codex",
   config: {
     reasoning: {
       effort: "low",
