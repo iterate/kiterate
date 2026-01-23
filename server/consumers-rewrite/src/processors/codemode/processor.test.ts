@@ -19,7 +19,8 @@ import { CodemodeProcessor } from "./processor.js";
 const decodeDone = (event: { payload: unknown }) => {
   const payload = event.payload as {
     requestId: string;
-    output: { success: true; data: string };
+    success: true;
+    data: string;
     logs: Array<{ args: unknown[]; timestamp: string }>;
   };
   return payload;
@@ -28,7 +29,8 @@ const decodeDone = (event: { payload: unknown }) => {
 const decodeFailed = (event: { payload: unknown }) => {
   const payload = event.payload as {
     requestId: string;
-    output: { success: false; error: string };
+    success: false;
+    error: string;
     logs: Array<{ args: unknown[]; timestamp: string }>;
   };
   return payload;
