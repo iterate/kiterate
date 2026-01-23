@@ -1,4 +1,6 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai";
+import * as Otlp from "@effect/opentelemetry/Otlp";
+import * as OtlpSerialization from "@effect/opentelemetry/OtlpSerialization";
 import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
@@ -10,6 +12,12 @@ import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
 
 const port = parseInt(process.env.PORT ?? "3000", 10);
+
+// Jaeger tracing (local OTLP endpoint for debugging)
+const TracingLive = Otlp.layer({
+  baseUrl: "http://localhost:4318",
+  resource: { serviceName: "kiterate" },
+}).pipe(Layer.provide(FetchHttpClient.layer), Layer.provide(OtlpSerialization.layerJson));
 
 const StreamStorageLive = StreamStorage.fileSystemLayer(".data/streams").pipe(
   Layer.provide(NodeContext.layer),
@@ -35,6 +43,9 @@ const StreamManagerLive = ProcessorsLive.pipe(
   Layer.provide(LanguageModelLive),
 );
 
-const MainLive = ServerLive(port).pipe(Layer.provide(StreamManagerLive));
+const MainLive = ServerLive(port).pipe(
+  Layer.provide(StreamManagerLive),
+  Layer.provide(TracingLive),
+);
 
 NodeRuntime.runMain(Layer.launch(MainLive));

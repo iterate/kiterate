@@ -20,7 +20,7 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
-import { withTraceFromEvent } from "../../tracing/helpers.js";
+import { withSpanFromEvent } from "../../tracing/helpers.js";
 import {
   LlmLoopActivatedEvent,
   RequestEndedEvent,
@@ -342,14 +342,16 @@ export const CodemodeProcessor: Processor<never> = {
 
             // When LLM loop is activated, emit our system prompt edit
             if (LlmLoopActivatedEvent.is(event) && !state.systemPromptEmitted) {
-              yield* Effect.log("emitting codemode system prompt");
-              yield* stream.append(
-                SystemPromptEditEvent.make({
-                  mode: "append",
-                  content: CODEMODE_SYSTEM_PROMPT,
-                  source: Option.some("codemode"),
-                }),
-              );
+              yield* Effect.gen(function* () {
+                yield* Effect.log("emitting codemode system prompt");
+                yield* stream.append(
+                  SystemPromptEditEvent.make({
+                    mode: "append",
+                    content: CODEMODE_SYSTEM_PROMPT,
+                    source: Option.some("codemode"),
+                  }),
+                );
+              }).pipe(withSpanFromEvent("codemode.emit-system-prompt", event));
               // Mark as emitted locally (reducer will also see our event on replay)
               state = State.make({ ...state, systemPromptEmitted: true });
             }
@@ -360,76 +362,78 @@ export const CodemodeProcessor: Processor<never> = {
               const newBlocks = blocks.slice(prevState.processedBlockCount);
 
               if (newBlocks.length > 0) {
-                yield* Effect.log(`found ${newBlocks.length} new codemode blocks`);
-              }
-
-              for (let i = 0; i < newBlocks.length; i++) {
-                const block = newBlocks[i]!;
-                const blockIndex = prevState.processedBlockCount + i;
-                const requestId = RequestId.make(
-                  `${Option.getOrElse(prevState.currentRequestOffset, () => event.offset)}.${blockIndex}`,
-                );
-
-                yield* stream.append(
-                  CodeBlockAddedEvent.make({
-                    requestId,
-                    code: block.code,
-                  }),
-                );
+                yield* Effect.gen(function* () {
+                  yield* Effect.log(`found ${newBlocks.length} new codemode blocks`);
+                  for (let i = 0; i < newBlocks.length; i++) {
+                    const block = newBlocks[i]!;
+                    const blockIndex = prevState.processedBlockCount + i;
+                    const requestId = RequestId.make(
+                      `${Option.getOrElse(prevState.currentRequestOffset, () => event.offset)}.${blockIndex}`,
+                    );
+                    yield* stream.append(
+                      CodeBlockAddedEvent.make({
+                        requestId,
+                        code: block.code,
+                      }),
+                    );
+                  }
+                }).pipe(withSpanFromEvent("codemode.detect-blocks", event));
               }
             }
 
             // When a code block is added, evaluate it
             if (CodeBlockAddedEvent.is(event)) {
-              const { requestId, code } = event.payload;
+              yield* Effect.gen(function* () {
+                const { requestId, code } = event.payload;
 
-              yield* Effect.log(`evaluating code block ${requestId}`);
-              yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
+                yield* Effect.log(`evaluating code block ${requestId}`);
+                yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
 
-              // Run the evaluation (this is async/Promise-based)
-              const result = yield* Effect.promise(() => executeCode(code)).pipe(
-                Effect.withSpan("codemode.eval"),
-              );
+                // Run the evaluation (this is async/Promise-based)
+                const result = yield* Effect.promise(() => executeCode(code));
 
-              if (result.output.success) {
-                yield* stream.append(
-                  CodeEvalDoneEvent.make({
-                    requestId,
-                    output: result.output,
-                    logs: result.logs,
-                  }),
-                );
-                yield* Effect.log(`code block ${requestId} completed successfully`);
+                if (result.output.success) {
+                  yield* stream.append(
+                    CodeEvalDoneEvent.make({
+                      requestId,
+                      output: result.output,
+                      logs: result.logs,
+                    }),
+                  );
+                  yield* Effect.log(`code block ${requestId} completed successfully`);
 
-                // Append a fake user message to inform the LLM of the result
-                const summary = createResultSummary(
-                  true,
-                  result.output.data,
-                  undefined,
-                  result.logs,
-                );
-                yield* stream.append(UserMessageEvent.make({ content: summary }));
-              } else {
-                yield* stream.append(
-                  CodeEvalFailedEvent.make({
-                    requestId,
-                    output: result.output,
-                    logs: result.logs,
-                  }),
-                );
-                yield* Effect.log(`code block ${requestId} failed: ${result.output.error}`);
+                  // Append a synthetic user message to inform the LLM of the result
+                  const summary = createResultSummary(
+                    true,
+                    result.output.data,
+                    undefined,
+                    result.logs,
+                  );
+                  yield* Effect.log(`appending codemode result (${summary.length} chars)`);
+                  yield* stream.append(UserMessageEvent.make({ content: summary }));
+                } else {
+                  yield* stream.append(
+                    CodeEvalFailedEvent.make({
+                      requestId,
+                      output: result.output,
+                      logs: result.logs,
+                    }),
+                  );
+                  yield* Effect.log(`code block ${requestId} failed: ${result.output.error}`);
 
-                // Append a fake user message to inform the LLM of the failure
-                const summary = createResultSummary(
-                  false,
-                  undefined,
-                  result.output.error,
-                  result.logs,
-                );
-                yield* stream.append(UserMessageEvent.make({ content: summary }));
-              }
+                  // Append a synthetic user message to inform the LLM of the failure
+                  const summary = createResultSummary(
+                    false,
+                    undefined,
+                    result.output.error,
+                    result.logs,
+                  );
+                  yield* Effect.log(`appending codemode error result (${summary.length} chars)`);
+                  yield* stream.append(UserMessageEvent.make({ content: summary }));
+                }
+              }).pipe(withSpanFromEvent("codemode.eval", event));
             }
-          }).pipe(withTraceFromEvent(event)),
+          }),
         ),
       );
     }),

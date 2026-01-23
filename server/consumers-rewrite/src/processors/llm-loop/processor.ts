@@ -270,11 +270,14 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
             if (!state.enabled) return;
             if (!state.shouldTriggerLlmResponse) return;
 
-            yield* debounced.trigger({
-              history: state.history,
-              systemPrompt: state.systemPrompt,
-            });
-          }).pipe(withTraceFromEvent(event)),
+            // Trigger LLM request (debounced) - pass event for trace context
+            yield* debounced
+              .trigger({
+                history: state.history,
+                systemPrompt: state.systemPrompt,
+              })
+              .pipe(withTraceFromEvent(event));
+          }),
         ),
       );
     }),

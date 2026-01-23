@@ -60,3 +60,13 @@ export const withTraceFromEvent =
   (event: Event) =>
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     Effect.withParentSpan(self, externalSpanFromEvent(event));
+
+/**
+ * Pipe helper: create a span AND link it to an event's trace.
+ * Combines Effect.withSpan + withTraceFromEvent in one call.
+ * Usage: someEffect.pipe(withSpanFromEvent("my-span", event))
+ */
+export const withSpanFromEvent =
+  (name: string, event: Event) =>
+  <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    self.pipe(Effect.withSpan(name), withTraceFromEvent(event));
