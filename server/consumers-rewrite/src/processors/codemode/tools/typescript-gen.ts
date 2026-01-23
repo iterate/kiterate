@@ -3,8 +3,7 @@
  *
  * Generates TypeScript type strings from JSON Schema for LLM documentation.
  */
-import { compile, type JSONSchema } from "json-schema-to-typescript";
-import { Effect } from "effect";
+import { compileSync, type JSONSchema } from "@mmkal/json-schema-to-typescript";
 
 // -------------------------------------------------------------------------------------
 // JSON Schema to TypeScript
@@ -14,43 +13,13 @@ import { Effect } from "effect";
  * Convert a JSON Schema to a TypeScript inline type string.
  * For example: `{ query: string; maxResults?: number }`
  *
- * Returns a fallback `unknown` type if conversion fails.
+ * Returns `unknown` if conversion fails.
  */
-export const jsonSchemaToTypeString = (schema: unknown): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    try {
-      // Ensure we have a valid object type schema
-      const jsonSchema = schema as JSONSchema;
-
-      // Use json-schema-to-typescript to generate the interface
-      const fullInterface = yield* Effect.promise(() =>
-        compile(jsonSchema, "Params", {
-          bannerComment: "",
-          declareExternallyReferenced: false,
-          additionalProperties: false,
-          unknownAny: false,
-        }),
-      );
-
-      // Extract just the type body (remove "export interface Params" wrapper)
-      // Input:  "export interface Params {\n  query: string;\n  maxResults?: number;\n}\n"
-      // Output: "{ query: string; maxResults?: number }"
-      const typeBody = extractTypeBody(fullInterface);
-      return typeBody;
-    } catch (error) {
-      yield* Effect.logWarning(`Failed to convert JSON Schema to TypeScript: ${error}`);
-      return "unknown";
-    }
-  });
-
-/**
- * Synchronous version that returns a Promise (for use in non-Effect code).
- */
-export const jsonSchemaToTypeStringSync = async (schema: unknown): Promise<string> => {
+export const jsonSchemaToTypeString = (schema: unknown): string => {
   try {
     const jsonSchema = schema as JSONSchema;
 
-    const fullInterface = await compile(jsonSchema, "Params", {
+    const fullInterface = compileSync(jsonSchema, "Params", {
       bannerComment: "",
       declareExternallyReferenced: false,
       additionalProperties: false,
@@ -99,13 +68,13 @@ const extractTypeBody = (fullInterface: string): string => {
  * deepResearch(params: { query: string }): Promise<unknown>
  * ```
  */
-export const generateToolSignature = async (tool: {
+export const generateToolSignature = (tool: {
   name: string;
   description: string;
   parametersJsonSchema: unknown;
   returnDescription?: string | undefined;
-}): Promise<string> => {
-  const paramsType = await jsonSchemaToTypeStringSync(tool.parametersJsonSchema);
+}): string => {
+  const paramsType = jsonSchemaToTypeString(tool.parametersJsonSchema);
   const returnComment = tool.returnDescription ? ` /* ${tool.returnDescription} */` : "";
 
   return `/** ${tool.description} */\n${tool.name}(params: ${paramsType}): Promise<unknown${returnComment}>`;
@@ -125,19 +94,19 @@ export const generateToolSignature = async (tool: {
  * add(params: { a: number; b: number }): Promise<unknown /* The sum *\/>
  * ```
  */
-export const generateToolsTypeBlock = async (
+export const generateToolsTypeBlock = (
   tools: ReadonlyArray<{
     name: string;
     description: string;
     parametersJsonSchema: unknown;
     returnDescription?: string;
   }>,
-): Promise<string> => {
+): string => {
   if (tools.length === 0) {
     return "";
   }
 
-  const signatures = await Promise.all(tools.map(generateToolSignature));
+  const signatures = tools.map(generateToolSignature);
 
   return `// Available tools:\n\n${signatures.join("\n\n")}`;
 };

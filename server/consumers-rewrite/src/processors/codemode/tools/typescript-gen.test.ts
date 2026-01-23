@@ -1,86 +1,61 @@
 import { describe, it, expect } from "@effect/vitest";
-import { Effect } from "effect";
 
 import {
   jsonSchemaToTypeString,
-  jsonSchemaToTypeStringSync,
   generateToolSignature,
   generateToolsTypeBlock,
 } from "./typescript-gen.js";
 
 describe("jsonSchemaToTypeString", () => {
-  it.effect("converts simple object schema to inline type", () =>
-    Effect.gen(function* () {
-      const schema = {
-        type: "object",
-        properties: {
-          query: { type: "string" },
-          limit: { type: "number" },
-        },
-        required: ["query"],
-        additionalProperties: false,
-      };
-
-      const result = yield* jsonSchemaToTypeString(schema);
-
-      expect(result).toContain("query: string");
-      expect(result).toContain("limit?: number");
-      expect(result).toMatch(/^\{.*\}$/); // Should be inline
-    }),
-  );
-
-  it.effect("handles nested objects", () =>
-    Effect.gen(function* () {
-      const schema = {
-        type: "object",
-        properties: {
-          config: {
-            type: "object",
-            properties: {
-              enabled: { type: "boolean" },
-            },
-          },
-        },
-        additionalProperties: false,
-      };
-
-      const result = yield* jsonSchemaToTypeString(schema);
-
-      expect(result).toContain("config?:");
-      expect(result).toContain("enabled?: boolean");
-    }),
-  );
-
-  it.effect("handles schema without type (defaults to any)", () =>
-    Effect.gen(function* () {
-      // Pass a schema without a type - json-schema-to-typescript treats this as allowing any
-      const result = yield* jsonSchemaToTypeString({ invalid: true });
-      // The library is lenient and produces a type anyway
-      expect(typeof result).toBe("string");
-    }),
-  );
-});
-
-describe("jsonSchemaToTypeStringSync", () => {
-  it("converts schema synchronously", async () => {
+  it("converts simple object schema to inline type", () => {
     const schema = {
       type: "object",
       properties: {
-        name: { type: "string" },
+        query: { type: "string" },
+        limit: { type: "number" },
       },
-      required: ["name"],
+      required: ["query"],
       additionalProperties: false,
     };
 
-    const result = await jsonSchemaToTypeStringSync(schema);
+    const result = jsonSchemaToTypeString(schema);
 
-    expect(result).toContain("name: string");
+    expect(result).toContain("query: string");
+    expect(result).toContain("limit?: number");
+    expect(result).toMatch(/^\{.*\}$/); // Should be inline
+  });
+
+  it("handles nested objects", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        config: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean" },
+          },
+        },
+      },
+      additionalProperties: false,
+    };
+
+    const result = jsonSchemaToTypeString(schema);
+
+    expect(result).toContain("config?:");
+    expect(result).toContain("enabled?: boolean");
+  });
+
+  it("handles schema without type (defaults to any)", () => {
+    // Pass a schema without a type - json-schema-to-typescript treats this as allowing any
+    const result = jsonSchemaToTypeString({ invalid: true });
+    // The library is lenient and produces a type anyway
+    expect(typeof result).toBe("string");
   });
 });
 
 describe("generateToolSignature", () => {
-  it("generates a complete function signature", async () => {
-    const result = await generateToolSignature({
+  it("generates a complete function signature", () => {
+    const result = generateToolSignature({
       name: "searchDatabase",
       description: "Searches the database for records",
       parametersJsonSchema: {
@@ -101,8 +76,8 @@ describe("generateToolSignature", () => {
     expect(result).toContain("Promise<unknown /* Matching records */>");
   });
 
-  it("handles missing return description", async () => {
-    const result = await generateToolSignature({
+  it("handles missing return description", () => {
+    const result = generateToolSignature({
       name: "doSomething",
       description: "Does something",
       parametersJsonSchema: {
@@ -119,7 +94,7 @@ describe("generateToolSignature", () => {
 });
 
 describe("generateToolsTypeBlock", () => {
-  it("generates a block with multiple tool signatures", async () => {
+  it("generates a block with multiple tool signatures", () => {
     const tools = [
       {
         name: "add",
@@ -150,7 +125,7 @@ describe("generateToolsTypeBlock", () => {
       },
     ];
 
-    const result = await generateToolsTypeBlock(tools);
+    const result = generateToolsTypeBlock(tools);
 
     expect(result).toContain("// Available tools:");
     expect(result).toContain("add(params:");
@@ -159,8 +134,8 @@ describe("generateToolsTypeBlock", () => {
     expect(result).toContain("x: number");
   });
 
-  it("returns empty string for empty tools array", async () => {
-    const result = await generateToolsTypeBlock([]);
+  it("returns empty string for empty tools array", () => {
+    const result = generateToolsTypeBlock([]);
     expect(result).toBe("");
   });
 });

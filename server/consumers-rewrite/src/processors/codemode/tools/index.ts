@@ -20,7 +20,6 @@ export type { ToolDefinition } from "./types.js";
 // TypeScript generation
 export {
   jsonSchemaToTypeString,
-  jsonSchemaToTypeStringSync,
   generateToolSignature,
   generateToolsTypeBlock,
 } from "./typescript-gen.js";

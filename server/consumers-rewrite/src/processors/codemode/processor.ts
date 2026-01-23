@@ -108,21 +108,17 @@ const formatLogs = (logs: Array<LogEntry>): string => {
  * Generate a system prompt section for a registered tool.
  * Includes a TypeScript function signature for better LLM understanding.
  */
-const generateToolPrompt = (tool: RegisteredToolMeta): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    // Generate TypeScript signature
-    const signature = yield* Effect.promise(() =>
-      generateToolSignature({
-        name: tool.name,
-        description: tool.description,
-        parametersJsonSchema: tool.parametersJsonSchema,
-        returnDescription: Option.isSome(tool.returnDescription)
-          ? tool.returnDescription.value
-          : undefined,
-      }),
-    );
+const generateToolPrompt = (tool: RegisteredToolMeta): string => {
+  const signature = generateToolSignature({
+    name: tool.name,
+    description: tool.description,
+    parametersJsonSchema: tool.parametersJsonSchema,
+    returnDescription: Option.isSome(tool.returnDescription)
+      ? tool.returnDescription.value
+      : undefined,
+  });
 
-    return dedent`
+  return dedent`
       ## Tool: ${tool.name}
 
       ${tool.description}
@@ -141,7 +137,7 @@ const generateToolPrompt = (tool: RegisteredToolMeta): Effect.Effect<string> =>
       </codemode>
       \`\`\`
     `;
-  });
+};
 
 /**
  * Create a summary message for the LLM after code evaluation.
@@ -529,20 +525,20 @@ export const CodemodeProcessor: Processor<ToolRegistry> = {
             if (ToolRegisteredEvent.is(event)) {
               const toolName = event.payload.name;
               if (!HashSet.has(state.toolPromptsEmitted, toolName)) {
-                yield* Effect.gen(function* () {
-                  const toolMeta = state.registeredTools.find((t) => t.name === toolName);
-                  if (toolMeta) {
-                    yield* Effect.log(`emitting system prompt for tool: ${toolName}`);
-                    const promptContent = yield* generateToolPrompt(toolMeta);
-                    yield* stream.append(
-                      SystemPromptEditEvent.make({
-                        mode: "append",
-                        content: promptContent,
-                        source: Option.some(`codemode:tool:${toolName}`),
-                      }),
-                    );
-                  }
-                }).pipe(withSpanFromEvent("codemode.emit-tool-prompt", event));
+                const toolMeta = state.registeredTools.find((t) => t.name === toolName);
+                if (toolMeta) {
+                  yield* Effect.log(`emitting system prompt for tool: ${toolName}`).pipe(
+                    withSpanFromEvent("codemode.emit-tool-prompt", event),
+                  );
+                  const promptContent = generateToolPrompt(toolMeta);
+                  yield* stream.append(
+                    SystemPromptEditEvent.make({
+                      mode: "append",
+                      content: promptContent,
+                      source: Option.some(`codemode:tool:${toolName}`),
+                    }),
+                  );
+                }
                 // Mark as emitted locally
                 state = State.make({
                   ...state,

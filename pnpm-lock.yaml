@@ -120,6 +120,9 @@ importers:
       '@effect/rpc':
         specifier: ^0.73.0
         version: 0.73.0(@effect/platform@0.94.1(effect@3.19.14))(effect@3.19.14)
+      '@mmkal/json-schema-to-typescript':
+        specifier: ^15.0.4
+        version: 15.0.4
       dedent:
         specifier: ^1.7.1
         version: 1.7.1
@@ -132,9 +135,6 @@ importers:
       json-schema-to-ts:
         specifier: ^3.1.1
         version: 3.1.1
-      json-schema-to-typescript:
-        specifier: ^15.0.4
-        version: 15.0.4
       tinyexec:
         specifier: ^1.0.2
         version: 1.0.2
@@ -1601,6 +1601,11 @@ packages:
 
   '@mistralai/mistralai@1.10.0':
     resolution: {integrity: sha512-tdIgWs4Le8vpvPiUEWne6tK0qbVc+jMenujnvTqOjogrJUsCSQhus0tHTU1avDDh5//Rq2dFgP9mWRAdIEoBqg==}
+
+  '@mmkal/json-schema-to-typescript@15.0.4':
+    resolution: {integrity: sha512-e5P6qrl5YnZQOtaDAxT5ydmRsmwAzvw7O2u8IYj0VvK6217zhkaDWrphwS5DArwFuQmiNwo+FwcVyAvtX8KNig==}
+    engines: {node: '>=16.0.0'}
+    hasBin: true
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     resolution: {integrity: sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==}
@@ -4172,11 +4177,6 @@ packages:
   json-schema-to-ts@3.1.1:
     resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
     engines: {node: '>=16'}
-
-  json-schema-to-typescript@15.0.4:
-    resolution: {integrity: sha512-Su9oK8DR4xCmDsLlyvadkXzX6+GGXJpbhwoLtOGArAG61dvbW4YQmSEno2y66ahpIdmLMg6YUf/QHLgiwvkrHQ==}
-    engines: {node: '>=16.0.0'}
-    hasBin: true
 
   json-schema-traverse@0.4.1:
     resolution: {integrity: sha512-xbbCH5dCYU5T8LcEhhuh7HJ88HXuW3qsI3Y0zOZFKfZEHcpWiHU/Jxzk629Brsab/mMiHQti9wMP+845RPe3Vg==}
@@ -6909,6 +6909,17 @@ snapshots:
     dependencies:
       zod: 3.25.76
       zod-to-json-schema: 3.25.1(zod@3.25.76)
+
+  '@mmkal/json-schema-to-typescript@15.0.4':
+    dependencies:
+      '@apidevtools/json-schema-ref-parser': 11.9.3
+      '@types/json-schema': 7.0.15
+      '@types/lodash': 4.17.23
+      js-yaml: 4.1.1
+      lodash: 4.17.23
+      minimist: 1.2.8
+      prettier: 3.8.0
+      tinyglobby: 0.2.15
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     optional: true
@@ -9704,18 +9715,6 @@ snapshots:
     dependencies:
       '@babel/runtime': 7.28.6
       ts-algebra: 2.0.0
-
-  json-schema-to-typescript@15.0.4:
-    dependencies:
-      '@apidevtools/json-schema-ref-parser': 11.9.3
-      '@types/json-schema': 7.0.15
-      '@types/lodash': 4.17.23
-      is-glob: 4.0.3
-      js-yaml: 4.1.1
-      lodash: 4.17.23
-      minimist: 1.2.8
-      prettier: 3.8.0
-      tinyglobby: 0.2.15
 
   json-schema-traverse@0.4.1: {}
 
