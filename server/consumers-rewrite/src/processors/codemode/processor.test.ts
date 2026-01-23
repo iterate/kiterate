@@ -3,10 +3,12 @@ import { it, expect } from "@effect/vitest";
 import dedent from "dedent";
 import { Effect } from "effect";
 
+import { Schema } from "effect";
 import { Offset, StreamPath } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { makeTestEventStream, type TestEventStream } from "../../testing/index.js";
 import { RequestEndedEvent, RequestStartedEvent, ResponseSseEvent } from "../llm-loop/events.js";
+import { SystemPromptEditEvent } from "../llm-loop/events.js";
 import {
   CodeBlockAddedEvent,
   CodeEvalDoneEvent,
@@ -406,8 +408,6 @@ it.scoped("includes console logs in failed execution summary", () =>
 // Tool Registration Tests
 // -------------------------------------------------------------------------------------
 
-import { Schema } from "effect";
-import { SystemPromptEditEvent } from "../llm-loop/events.js";
 import { ToolRegisteredEvent } from "./events.js";
 import { defineTool, toolDefinitionToMeta, toolRegistryInMemoryLayer } from "./tools/index.js";
 
