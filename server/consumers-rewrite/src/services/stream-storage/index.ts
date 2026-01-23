@@ -10,3 +10,5 @@ export type { StreamStorageManagerTypeId as StreamStorageManagerTypeIdType } fro
 // Re-export layers
 export { inMemoryLayer } from "./inMemory.js";
 export { fileSystemLayer } from "./fileSystem.js";
+export { sqliteLayer } from "./sqlite.js";
+export type { EventRow } from "./sqlite.js";

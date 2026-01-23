@@ -1,5 +1,6 @@
+import { FileSystem } from "@effect/platform";
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { NodeHttpServer } from "@effect/platform-node";
+import { NodeContext, NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
@@ -7,7 +8,7 @@ import { AppLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
 
-const testLayer = Layer.merge(
+const inMemoryTestLayer = Layer.merge(
   AppLive.pipe(
     Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
@@ -15,6 +16,25 @@ const testLayer = Layer.merge(
   ),
   NodeHttpServer.layerTest,
 );
+
+// SQLite test layer - uses temp directory
+const sqliteTestLayer = Layer.merge(
+  Layer.unwrapScoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tempDir = yield* fs.makeTempDirectoryScoped();
+      return AppLive.pipe(
+        Layer.provide(StreamManager.liveLayer),
+        Layer.provide(StreamStorage.sqliteLayer(`${tempDir}/test.db`)),
+        Layer.provide(NodeHttpServer.layerTest),
+      );
+    }),
+  ).pipe(Layer.provide(NodeContext.layer)),
+  NodeHttpServer.layerTest,
+);
+
+// Default to inMemory for existing tests
+const testLayer = inMemoryTestLayer;
 
 const test = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
   it.scopedLive(name, () =>
@@ -116,6 +136,40 @@ describe("Durable Stream Server", () => {
       const error = yield* client.execute(request).pipe(Effect.flip);
       expect(error._tag).toBe("ResponseError");
       expect((error as { response: { status: number } }).response.status).toBe(400);
+    }),
+  );
+});
+
+describe("Durable Stream Server (SQLite)", () => {
+  const sqliteTest = <A, E>(name: string, effect: Effect.Effect<A, E, HttpClient.HttpClient>) =>
+    it.scopedLive(name, () =>
+      effect.pipe(Effect.timeout("500 millis"), Effect.provide(sqliteTestLayer)),
+    );
+
+  sqliteTest(
+    "POST returns 204 with SQLite storage",
+    Effect.gen(function* () {
+      const client = yield* HttpClient.HttpClient;
+      const response = yield* client.execute(
+        HttpClientRequest.post("/agents/test/sqlite").pipe(
+          HttpClientRequest.bodyUnsafeJson({ type: "test", payload: { msg: "hello" } }),
+        ),
+      );
+      expect(response.status).toBe(204);
+    }),
+  );
+
+  sqliteTest(
+    "SSE subscriber receives posted event with SQLite",
+    Effect.gen(function* () {
+      const fiber = yield* subscribe("/agents/chat/sqlite-room");
+      yield* Effect.sleep("10 millis");
+      yield* post("/agents/chat/sqlite-room", { type: "message", payload: { text: "SQLite!" } });
+
+      const chunks = yield* fiber;
+      const data = Chunk.toReadonlyArray(chunks).join("");
+      expect(data).toContain("data:");
+      expect(data).toContain("SQLite!");
     }),
   );
 });

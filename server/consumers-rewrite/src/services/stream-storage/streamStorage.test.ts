@@ -226,4 +226,15 @@ describe("StreamStorage", () => {
   ).pipe(Layer.provide(NodeContext.layer));
 
   streamStorageTests("FileSystem", () => fileSystemTestLayer);
+
+  // SQLite implementation - uses scoped temp file that auto-cleans
+  const sqliteTestLayer = Layer.unwrapScoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tempDir = yield* fs.makeTempDirectoryScoped();
+      return StreamStorage.sqliteLayer(`${tempDir}/test.db`);
+    }),
+  ).pipe(Layer.provide(NodeContext.layer));
+
+  streamStorageTests("SQLite", () => sqliteTestLayer);
 });
