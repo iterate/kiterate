@@ -16,7 +16,7 @@ import { execa } from "execa";
  * ```
  */
 import dedent from "dedent";
-import { Effect, Option, Schema, Stream } from "effect";
+import { Context, Effect, HashSet, Option, Schema, Stream } from "effect";
 
 import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
@@ -30,7 +30,11 @@ import {
   CodeEvalStartedEvent,
   LogEntry,
   RequestId,
+  ToolRegisteredEvent,
+  ToolUnregisteredEvent,
 } from "./events.js";
+import { ToolRegistry } from "./tools/service.js";
+import { RegisteredToolMeta } from "./tools/types.js";
 
 // -------------------------------------------------------------------------------------
 // Constants
@@ -100,6 +104,35 @@ const formatLogs = (logs: Array<LogEntry>): string => {
 };
 
 /**
+ * Generate a system prompt section for a registered tool.
+ */
+const generateToolPrompt = (tool: RegisteredToolMeta): string => {
+  const returnDesc = Option.isSome(tool.returnDescription)
+    ? `\n\n**Returns:** ${tool.returnDescription.value}`
+    : "";
+
+  return dedent`
+    ## Tool: ${tool.name}
+
+    ${tool.description}
+
+    **Parameters:**
+    \`\`\`json
+    ${JSON.stringify(tool.parametersJsonSchema, null, 2)}
+    \`\`\`${returnDesc}
+
+    **Usage:**
+    \`\`\`
+    <codemode>
+    async function codemode() {
+      return await ${tool.name}({ /* params */ });
+    }
+    </codemode>
+    \`\`\`
+  `;
+};
+
+/**
  * Create a summary message for the LLM after code evaluation.
  */
 const createResultSummary = (result: Result): string => {
@@ -142,6 +175,10 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
   inProgress: Schema.Array(RequestId),
   /** Whether we've emitted the system prompt edit */
   systemPromptEmitted: Schema.Boolean,
+  /** Registered tools metadata (for system prompt generation) */
+  registeredTools: Schema.Array(RegisteredToolMeta),
+  /** Tool names for which we've emitted system prompt edits */
+  toolPromptsEmitted: Schema.HashSet(Schema.String),
 }) {
   static initial = State.make({
     lastOffset: Offset.make("-1"),
@@ -151,6 +188,8 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
     pendingEvaluation: [],
     inProgress: [],
     systemPromptEmitted: false,
+    registeredTools: [],
+    toolPromptsEmitted: HashSet.empty(),
   });
 }
 
@@ -188,12 +227,20 @@ const extractCodemodeBlocks = (
   return blocks;
 };
 
+/**
+ * A tool function that can be called from codemode.
+ * Wraps the actual tool implementation with parameter validation.
+ */
+type ToolFunction = (params: unknown) => Promise<unknown>;
+
 type ExecutionContext = {
   console: Console;
   fetch: typeof global.fetch;
   execa: typeof import("execa").execa;
   process: { env: typeof process.env };
   require: typeof global.require;
+  /** Registered tools, keyed by name */
+  [toolName: string]: unknown;
 };
 
 type SuccessResult = { success: true; data: string; logs: Array<LogEntry> };
@@ -203,8 +250,14 @@ type Result = SuccessResult | FailureResult;
 /**
  * Execute code and capture console.log calls.
  * Code must define `async function codemode() { ... }`.
+ *
+ * @param code - The code to execute
+ * @param tools - Map of tool name to tool function
  */
-const executeCode = async (code: string): Promise<Result> => {
+const executeCode = async (
+  code: string,
+  tools: ReadonlyMap<string, ToolFunction>,
+): Promise<Result> => {
   const logs: Array<LogEntry> = [];
 
   const logger =
@@ -222,9 +275,14 @@ const executeCode = async (code: string): Promise<Result> => {
   };
 
   try {
-    // Wrap the code to inject our console and extract the function
+    // Build the parameter list for the wrapper function
+    const toolNames = Array.from(tools.keys());
+    const baseParams = ["console", "fetch", "execa", "process", "require"];
+    const allParams = [...baseParams, ...toolNames];
+
+    // Wrap the code to inject our console, tools, and extract the function
     const wrappedCode = `
-      return (async ({console, fetch, execa, process, require}) => {
+      return (async ({${allParams.join(", ")}}) => {
         ${code}
         if (typeof codemode !== 'function') {
           throw new Error('Code must define an async function named "codemode"');
@@ -234,13 +292,22 @@ const executeCode = async (code: string): Promise<Result> => {
     `;
 
     const factory = new Function(wrappedCode)();
-    const result = await factory({
+
+    // Build the context object with base context + tools
+    const context: ExecutionContext = {
       console: capturedConsole as Console,
       fetch: global.fetch,
       execa: execa,
       process: { env: process.env },
       require: global.require,
-    } satisfies ExecutionContext);
+    };
+
+    // Add each tool to the context
+    for (const [name, fn] of tools) {
+      context[name] = fn;
+    }
+
+    const result = await factory(context);
 
     // Try to serialize the result
     try {
@@ -331,6 +398,52 @@ const reduce = (state: State, event: Event): State => {
     });
   }
 
+  // Track tool system prompt edits (for replay)
+  if (
+    SystemPromptEditEvent.is(event) &&
+    Option.isSome(event.payload.source) &&
+    event.payload.source.value.startsWith("codemode:tool:")
+  ) {
+    const toolName = event.payload.source.value.replace("codemode:tool:", "");
+    return State.make({
+      ...base,
+      toolPromptsEmitted: HashSet.add(state.toolPromptsEmitted, toolName),
+    });
+  }
+
+  // Handle tool registration
+  if (ToolRegisteredEvent.is(event)) {
+    const toolMeta: RegisteredToolMeta = {
+      name: event.payload.name,
+      description: event.payload.description,
+      parametersJsonSchema: event.payload.parametersJsonSchema,
+      returnDescription: event.payload.returnDescription,
+    };
+    // Replace existing tool with same name or add new
+    const existingIndex = state.registeredTools.findIndex((t) => t.name === event.payload.name);
+    const newTools =
+      existingIndex >= 0
+        ? [
+            ...state.registeredTools.slice(0, existingIndex),
+            toolMeta,
+            ...state.registeredTools.slice(existingIndex + 1),
+          ]
+        : [...state.registeredTools, toolMeta];
+    return State.make({
+      ...base,
+      registeredTools: newTools,
+    });
+  }
+
+  // Handle tool unregistration
+  if (ToolUnregisteredEvent.is(event)) {
+    return State.make({
+      ...base,
+      registeredTools: state.registeredTools.filter((t) => t.name !== event.payload.name),
+      toolPromptsEmitted: HashSet.remove(state.toolPromptsEmitted, event.payload.name),
+    });
+  }
+
   return State.make(base);
 };
 
@@ -338,16 +451,44 @@ const reduce = (state: State, event: Event): State => {
 // Processor
 // -------------------------------------------------------------------------------------
 
-export const CodemodeProcessor: Processor<never> = {
+/**
+ * Build a map of tool functions from the ToolRegistry for code execution.
+ * Each tool function wraps the tool's execute method with the parameter validation.
+ */
+const buildToolsMap = (
+  registry: Context.Tag.Service<typeof ToolRegistry>,
+  registeredTools: ReadonlyArray<RegisteredToolMeta>,
+): ReadonlyMap<string, ToolFunction> => {
+  const tools = new Map<string, ToolFunction>();
+
+  for (const toolMeta of registeredTools) {
+    const toolImpl = registry.get(toolMeta.name);
+    if (Option.isSome(toolImpl)) {
+      const tool = toolImpl.value;
+      // Wrap the tool's execute function
+      // Note: We could add schema validation here in the future
+      tools.set(toolMeta.name, async (params: unknown) => {
+        return tool.execute(params);
+      });
+    }
+  }
+
+  return tools;
+};
+
+export const CodemodeProcessor: Processor<ToolRegistry> = {
   name: "codemode",
 
   run: (stream) =>
     Effect.gen(function* () {
+      // Get the tool registry
+      const toolRegistry = yield* ToolRegistry;
+
       // Phase 1: Hydrate from history
       let state = yield* stream.read().pipe(Stream.runFold(State.initial, reduce));
 
       yield* Effect.log(
-        `hydrated, lastOffset=${state.lastOffset}, pending=${state.pendingEvaluation.length}, inProgress=${state.inProgress.length}`,
+        `hydrated, lastOffset=${state.lastOffset}, pending=${state.pendingEvaluation.length}, inProgress=${state.inProgress.length}, tools=${state.registeredTools.length}`,
       );
 
       // Phase 2: Subscribe to live events
@@ -371,6 +512,31 @@ export const CodemodeProcessor: Processor<never> = {
               }).pipe(withSpanFromEvent("codemode.emit-system-prompt", event));
               // Mark as emitted locally (reducer will also see our event on replay)
               state = State.make({ ...state, systemPromptEmitted: true });
+            }
+
+            // When a tool is registered, emit its system prompt
+            if (ToolRegisteredEvent.is(event)) {
+              const toolName = event.payload.name;
+              if (!HashSet.has(state.toolPromptsEmitted, toolName)) {
+                yield* Effect.gen(function* () {
+                  const toolMeta = state.registeredTools.find((t) => t.name === toolName);
+                  if (toolMeta) {
+                    yield* Effect.log(`emitting system prompt for tool: ${toolName}`);
+                    yield* stream.append(
+                      SystemPromptEditEvent.make({
+                        mode: "append",
+                        content: generateToolPrompt(toolMeta),
+                        source: Option.some(`codemode:tool:${toolName}`),
+                      }),
+                    );
+                  }
+                }).pipe(withSpanFromEvent("codemode.emit-tool-prompt", event));
+                // Mark as emitted locally
+                state = State.make({
+                  ...state,
+                  toolPromptsEmitted: HashSet.add(state.toolPromptsEmitted, toolName),
+                });
+              }
             }
 
             // When an LLM request ends, parse for codemode blocks
@@ -409,8 +575,11 @@ export const CodemodeProcessor: Processor<never> = {
                 yield* Effect.log(`evaluating code block ${requestId}`);
                 yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
 
+                // Build the tools map from the registry
+                const tools = buildToolsMap(toolRegistry, state.registeredTools);
+
                 // Run the evaluation (this is async/Promise-based)
-                const result = yield* Effect.promise(() => executeCode(code));
+                const result = yield* Effect.promise(() => executeCode(code, tools));
 
                 // Annotate span with result
                 yield* Effect.annotateCurrentSpan("eval.success", result.success);

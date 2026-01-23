@@ -60,3 +60,28 @@ export const CodeEvalFailedEvent = EventSchema.make("iterate:codemode:code-eval-
   error: Schema.String,
   logs: Schema.Array(LogEntry),
 });
+
+// -------------------------------------------------------------------------------------
+// Tool Registration Events
+// -------------------------------------------------------------------------------------
+
+/**
+ * Emitted when a tool is registered and available for use in codemode blocks.
+ * The actual implementation is provided separately via the ToolRegistry service.
+ */
+export const ToolRegisteredEvent = EventSchema.make("iterate:codemode:tool-registered", {
+  /** Unique tool name - becomes the function name in codemode */
+  name: Schema.String,
+  /** Human-readable description for the LLM */
+  description: Schema.String,
+  /** JSON Schema representation of parameters (for LLM documentation) */
+  parametersJsonSchema: Schema.Unknown,
+  /** Optional description of return value */
+  returnDescription: Schema.OptionFromNullOr(Schema.String),
+});
+
+/** Emitted when a tool is unregistered and no longer available */
+export const ToolUnregisteredEvent = EventSchema.make("iterate:codemode:tool-unregistered", {
+  /** Name of the tool to unregister */
+  name: Schema.String,
+});

@@ -14,6 +14,10 @@ import {
   CodeEvalStartedEvent,
 } from "./events.js";
 import { CodemodeProcessor } from "./processor.js";
+import { toolRegistryEmptyLayer } from "./tools/index.js";
+
+// Layer for tests - empty tool registry
+const TestLayer = toolRegistryEmptyLayer;
 
 // Helper to decode event payloads with proper typing
 const decodeDone = (event: { payload: unknown }) => {
@@ -99,7 +103,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     const userMsg = yield* stream.waitForEvent(UserMessageEvent);
     expect(userMsg.payload.content).toContain("completed successfully");
     expect(userMsg.payload.content).toContain("42");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("captures console.log calls", () =>
@@ -131,7 +135,7 @@ it.scoped("captures console.log calls", () =>
     expect(done.logs[0]?.args).toEqual(["hello", "world"]);
     expect(done.logs[1]?.args).toEqual([123]);
     expect(done.logs[0]?.timestamp).toBeDefined();
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("handles evaluation errors", () =>
@@ -163,7 +167,7 @@ it.scoped("handles evaluation errors", () =>
     const userMsg = yield* stream.waitForEvent(UserMessageEvent);
     expect(userMsg.payload.content).toContain("failed");
     expect(userMsg.payload.content).toContain("intentional error");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("handles missing codemode function", () =>
@@ -188,7 +192,7 @@ it.scoped("handles missing codemode function", () =>
     const failed = decodeFailed(failedEvent);
     expect(failed.success).toBe(false);
     expect(failed.error).toContain('async function named "codemode"');
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("handles multiple codemode blocks", () =>
@@ -234,7 +238,7 @@ it.scoped("handles multiple codemode blocks", () =>
 
     expect(done1.data).toBe("1");
     expect(done2.data).toBe("2");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("handles non-serializable return values", () =>
@@ -263,7 +267,7 @@ it.scoped("handles non-serializable return values", () =>
     const done = decodeDone(doneEvent);
     expect(done.success).toBe(true);
     expect(done.data).toContain("non-serializable");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 // -------------------------------------------------------------------------------------
@@ -298,7 +302,7 @@ it.scoped("appends user message with output after successful execution", () =>
     expect(userMsg.payload.content).toContain('"status":"ok"');
     expect(userMsg.payload.content).toContain('"count":42');
     expect(userMsg.payload.content).toContain("Please let the user know how it went");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("appends user message with error after failed execution", () =>
@@ -328,7 +332,7 @@ it.scoped("appends user message with error after failed execution", () =>
     expect(userMsg.payload.content).toContain("Error:");
     expect(userMsg.payload.content).toContain("database connection failed");
     expect(userMsg.payload.content).toContain("try again if appropriate");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("includes console logs in user message summary", () =>
@@ -362,7 +366,7 @@ it.scoped("includes console logs in user message summary", () =>
     expect(userMsg.payload.content).toContain("Step 1 complete");
     expect(userMsg.payload.content).toContain("items");
     expect(userMsg.payload.content).toContain("Finished!");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
 );
 
 it.scoped("includes console logs in failed execution summary", () =>
@@ -395,5 +399,133 @@ it.scoped("includes console logs in failed execution summary", () =>
     expect(userMsg.payload.content).toContain("Attempting operation...");
     expect(userMsg.payload.content).toContain("Warning: retrying...");
     expect(userMsg.payload.content).toContain("max retries exceeded");
-  }),
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+// -------------------------------------------------------------------------------------
+// Tool Registration Tests
+// -------------------------------------------------------------------------------------
+
+import { Schema } from "effect";
+import { SystemPromptEditEvent } from "../llm-loop/events.js";
+import { ToolRegisteredEvent } from "./events.js";
+import { defineTool, toolDefinitionToMeta, toolRegistryInMemoryLayer } from "./tools/index.js";
+
+it.scoped("registers a tool and makes it available in codemode", () =>
+  Effect.gen(function* () {
+    // Define a simple tool
+    const addTool = defineTool({
+      name: "add",
+      description: "Adds two numbers",
+      parameters: Schema.Struct({
+        a: Schema.Number,
+        b: Schema.Number,
+      }),
+      returnDescription: "The sum of a and b",
+      execute: async ({ a, b }) => ({ result: a + b }),
+    });
+
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Emit the tool registration event
+    yield* stream.append(
+      ToolRegisteredEvent.make({
+        ...toolDefinitionToMeta(addTool),
+      }),
+    );
+
+    // Should emit a system prompt edit for the tool
+    // Skip the first one (codemode base prompt)
+    yield* stream.waitForEvent(SystemPromptEditEvent);
+    const toolPrompt = yield* stream.waitForEvent(SystemPromptEditEvent);
+    expect(toolPrompt.payload.content).toContain("Tool: add");
+    expect(toolPrompt.payload.content).toContain("Adds two numbers");
+    expect(toolPrompt.payload.content).toContain("await add(");
+
+    // Now use the tool in a codemode block
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          return await add({ a: 5, b: 3 });
+        }
+        </codemode>
+      `,
+    );
+
+    const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
+    const done = decodeDone(doneEvent);
+    expect(done.success).toBe(true);
+    expect(JSON.parse(done.data)).toEqual({ result: 8 });
+  }).pipe(
+    Effect.provide(
+      toolRegistryInMemoryLayer([
+        defineTool({
+          name: "add",
+          description: "Adds two numbers",
+          parameters: Schema.Struct({ a: Schema.Number, b: Schema.Number }),
+          execute: async ({ a, b }) => ({ result: a + b }),
+        }),
+      ]),
+    ),
+  ),
+);
+
+it.scoped("tool execution errors are reported to the LLM", () =>
+  Effect.gen(function* () {
+    const failingTool = defineTool({
+      name: "failingTool",
+      description: "A tool that always fails",
+      parameters: Schema.Struct({ input: Schema.String }),
+      execute: async () => {
+        throw new Error("Tool execution failed!");
+      },
+    });
+
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Register the tool
+    yield* stream.append(ToolRegisteredEvent.make(toolDefinitionToMeta(failingTool)));
+
+    // Use the tool
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          return await failingTool({ input: "test" });
+        }
+        </codemode>
+      `,
+    );
+
+    const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
+    const failed = decodeFailed(failedEvent);
+    expect(failed.success).toBe(false);
+    expect(failed.error).toContain("Tool execution failed!");
+  }).pipe(
+    Effect.provide(
+      toolRegistryInMemoryLayer([
+        defineTool({
+          name: "failingTool",
+          description: "A tool that always fails",
+          parameters: Schema.Struct({ input: Schema.String }),
+          execute: async () => {
+            throw new Error("Tool execution failed!");
+          },
+        }),
+      ]),
+    ),
+  ),
 );
