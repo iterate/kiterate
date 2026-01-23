@@ -297,3 +297,79 @@ Trace: abc123
 ```
 
 All events in a request chain share the same `traceId`, enabling end-to-end tracing.
+
+## User Message Interjection Modes
+
+The `UserMessageEvent` supports a `mode` field that controls how new messages interact with in-flight LLM responses:
+
+| Mode                  | Behavior                                             |
+| --------------------- | ---------------------------------------------------- |
+| `interrupt` (default) | Stop current response, start new request immediately |
+| `queue`               | Don't interrupt, respond after current finishes      |
+| `background`          | Add to history, no response triggered                |
+
+Additionally, `CancelRequestEvent` can be sent to stop the current response without triggering a new one.
+
+---
+
+## Claude's Debug CLI
+
+**Note to Claude:** This CLI (`src/debug-cli.ts`) is YOUR tooling for debugging and testing this codebase. If you find it lacking or need different information while working, iterate on it! Keep this documentation up to date as you improve the tools.
+
+### Usage
+
+```bash
+tsx src/debug-cli.ts [PATH] COMMAND [ARGS]
+```
+
+### Path Selection
+
+The stream path is determined in priority order:
+
+1. First arg if it contains `/` or matches an existing `.yaml` file
+2. `STREAM_PATH` env var
+3. Default: `test/modes`
+
+### YAML Queries (offline)
+
+```bash
+# Show conversation flow (user/assistant messages with modes)
+tsx src/debug-cli.ts convo
+tsx src/debug-cli.ts chat/room1 convo         # specific path
+
+# Show request lifecycle (started → ended/cancelled)
+tsx src/debug-cli.ts requests
+
+# Show events with filters
+tsx src/debug-cli.ts events --last=20         # last N events
+tsx src/debug-cli.ts events --type=cancelled  # filter by type
+tsx src/debug-cli.ts events --around=0000000000000015  # context around offset
+
+# Search YAML content
+tsx src/debug-cli.ts search "interrupted"
+```
+
+### Interactive Testing (requires server)
+
+```bash
+# Enable openai model first
+tsx src/debug-cli.ts config
+
+# Send message and wait for response
+tsx src/debug-cli.ts chat "Hello"
+tsx src/debug-cli.ts chat "message" --queue
+tsx src/debug-cli.ts chat "message" --background
+
+# Cancel current request
+tsx src/debug-cli.ts stop
+
+# Run stress test of all modes
+tsx src/debug-cli.ts stress
+```
+
+### What to Look For
+
+- `convo` - Quick view of conversation flow, shows `[interrupted]` markers and `[queue]`/`[background]` modes
+- `requests` - Shows which requests completed vs were cancelled, helpful for debugging mode behavior
+- `events --type=cancelled` - Find all interrupted/failed requests
+- `search "response interrupted"` - Check if the `[response interrupted by user]` marker is being added
