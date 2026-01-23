@@ -10,14 +10,14 @@
 import { LanguageModel, Prompt } from "@effect/ai";
 import { Cause, Duration, Effect, Exit, Option, Schema, Stream } from "effect";
 
+import dedent from "dedent";
 import { Event, Offset } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
-import { makeActiveRequestFiber } from "./activeRequestFiber.js";
 import { withTraceFromEvent } from "../../tracing/helpers.js";
+import { makeActiveRequestFiber } from "./activeRequestFiber.js";
 import {
-  LlmLoopActivatedEvent,
   RequestCancelledEvent,
   RequestEndedEvent,
   RequestInterruptedEvent,
@@ -31,7 +31,11 @@ import {
 // -------------------------------------------------------------------------------------
 
 /** Default base system prompt */
-const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+const DEFAULT_SYSTEM_PROMPT = dedent`
+  You are a helpful assistant.
+
+  You should aim to "get things done". Be as proactive as possible. If you fail at a task, rather than asking "do you want me to search for XYZ?", you should aim to find a way to just search for XYZ yourself and and see if it does indeed help you complete the task.
+`;
 
 class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   enabled: Schema.Boolean,
@@ -43,8 +47,6 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   llmLastRespondedAt: Schema.Option(Offset),
   /** Current system prompt (built from edits) */
   systemPrompt: Schema.String,
-  /** Whether we've emitted the activated event for the current enabled state */
-  activatedEventEmitted: Schema.Boolean,
 }) {
   static initial = State.make({
     enabled: false,
@@ -53,7 +55,6 @@ class State extends Schema.Class<State>("LlmLoopProcessor/State")({
     llmRequestRequiredFrom: Option.none(),
     llmLastRespondedAt: Option.none(),
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    activatedEventEmitted: false,
   });
 
   /** Create a new State with the given updates */
@@ -95,16 +96,7 @@ const reduce = (state: State, event: Event): State => {
   // Config change
   if (ConfigSetEvent.is(event)) {
     const nowEnabled = event.payload.model === "openai";
-    // Reset activatedEventEmitted when enabling (so we emit activated event)
-    return state.with({
-      enabled: nowEnabled,
-      activatedEventEmitted: nowEnabled ? state.activatedEventEmitted : false,
-    });
-  }
-
-  // Track our own activated event
-  if (LlmLoopActivatedEvent.is(event)) {
-    return state.with({ activatedEventEmitted: true });
+    return state.with({ enabled: nowEnabled });
   }
 
   // System prompt edit
@@ -247,27 +239,11 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
 
       const debounced = yield* makeDebounced(startRequest, llmDebounce);
 
-      // Emit activated event if we're already enabled after hydration
-      if (state.enabled && !state.activatedEventEmitted) {
-        yield* stream.append(LlmLoopActivatedEvent.make());
-        state = state.with({ activatedEventEmitted: true });
-      }
-
       // Phase 2: Subscribe to live events
       yield* stream.subscribe({ from: state.lastOffset }).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             state = reduce(state, event);
-
-            // Emit activated event when we become enabled (and haven't emitted yet)
-            if (state.enabled && !state.activatedEventEmitted) {
-              yield* stream.append(LlmLoopActivatedEvent.make());
-              state = reduce(state, {
-                type: "iterate:llm-loop:activated",
-                offset: state.lastOffset,
-                payload: {},
-              } as Event);
-            }
 
             // !enabled only blocks future triggers; pending debounced runs still execute.
             if (!state.enabled) return;

@@ -22,12 +22,7 @@ import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { withSpanFromEvent } from "../../tracing/helpers.js";
-import {
-  LlmLoopActivatedEvent,
-  RequestEndedEvent,
-  ResponseSseEvent,
-  SystemPromptEditEvent,
-} from "../llm-loop/events.js";
+import { RequestEndedEvent, ResponseSseEvent, SystemPromptEditEvent } from "../llm-loop/events.js";
 import {
   CodeBlockAddedEvent,
   CodeEvalDoneEvent,
@@ -145,7 +140,7 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
   pendingEvaluation: Schema.Array(RequestId),
   /** Request IDs currently being evaluated */
   inProgress: Schema.Array(RequestId),
-  /** Whether we've emitted the system prompt edit for the current activation */
+  /** Whether we've emitted the system prompt edit */
   systemPromptEmitted: Schema.Boolean,
 }) {
   static initial = State.make({
@@ -362,8 +357,8 @@ export const CodemodeProcessor: Processor<never> = {
             const prevState = state;
             state = reduce(state, event);
 
-            // When LLM loop is activated, emit our system prompt edit
-            if (LlmLoopActivatedEvent.is(event) && !state.systemPromptEmitted) {
+            // Emit system prompt on first event if not yet emitted
+            if (!state.systemPromptEmitted) {
               yield* Effect.gen(function* () {
                 yield* Effect.log("emitting codemode system prompt");
                 yield* stream.append(
