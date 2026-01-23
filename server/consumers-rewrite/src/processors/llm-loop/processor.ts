@@ -10,12 +10,13 @@
 import { LanguageModel, Prompt } from "@effect/ai";
 import { Cause, Duration, Effect, Exit, Option, Schema, Stream } from "effect";
 
+import dedent from "dedent";
 import { Event, Offset } from "../../domain.js";
 import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
-import { makeActiveRequestFiber } from "./activeRequestFiber.js";
 import { withTraceFromEvent } from "../../tracing/helpers.js";
+import { makeActiveRequestFiber } from "./activeRequestFiber.js";
 import {
   RequestCancelledEvent,
   RequestEndedEvent,
@@ -30,7 +31,11 @@ import {
 // -------------------------------------------------------------------------------------
 
 /** Default base system prompt */
-const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
+const DEFAULT_SYSTEM_PROMPT = dedent`
+  You are a helpful assistant.
+
+  You should aim to "get things done". Be as proactive as possible. If you fail at a task, rather than asking "do you want me to search for XYZ?", you should aim to find a way to just search for XYZ yourself and and see if it does indeed help you complete the task.
+`;
 
 class State extends Schema.Class<State>("LlmLoopProcessor/State")({
   enabled: Schema.Boolean,
