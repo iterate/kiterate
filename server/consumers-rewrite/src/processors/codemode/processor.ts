@@ -408,11 +408,21 @@ export const CodemodeProcessor: Processor<never> = {
               yield* Effect.gen(function* () {
                 const { requestId, code } = event.payload;
 
+                // Annotate span with request context
+                yield* Effect.annotateCurrentSpan("request.id", requestId);
+
                 yield* Effect.log(`evaluating code block ${requestId}`);
                 yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
 
                 // Run the evaluation (this is async/Promise-based)
                 const result = yield* Effect.promise(() => executeCode(code));
+
+                // Annotate span with result
+                yield* Effect.annotateCurrentSpan("eval.success", result.success);
+                if (!result.success) {
+                  yield* Effect.annotateCurrentSpan("eval.error", result.error);
+                  yield* Effect.annotateCurrentSpan("error", true);
+                }
 
                 if (result.success) {
                   yield* stream.append(CodeEvalDoneEvent.make({ requestId, ...result }));

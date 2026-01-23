@@ -64,9 +64,20 @@ export const withTraceFromEvent =
 /**
  * Pipe helper: create a span AND link it to an event's trace.
  * Combines Effect.withSpan + withTraceFromEvent in one call.
+ * Auto-annotates span with event context (path, offset, type).
  * Usage: someEffect.pipe(withSpanFromEvent("my-span", event))
  */
 export const withSpanFromEvent =
   (name: string, event: Event) =>
   <A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    self.pipe(Effect.withSpan(name), withTraceFromEvent(event));
+    self.pipe(
+      Effect.tap(() =>
+        Effect.all([
+          Effect.annotateCurrentSpan("stream.path", event.path),
+          Effect.annotateCurrentSpan("event.offset", event.offset),
+          Effect.annotateCurrentSpan("event.type", event.type),
+        ]),
+      ),
+      Effect.withSpan(name),
+      withTraceFromEvent(event),
+    );

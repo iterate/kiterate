@@ -205,6 +205,10 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
           RequestStartedEvent.make({ requestParams: prompt }),
         );
 
+        // Annotate span with request context
+        yield* Effect.annotateCurrentSpan("request.offset", requestOffset);
+        yield* Effect.annotateCurrentSpan("request.message_count", history.length + 1);
+
         yield* Effect.log(`triggering generation, history=${history.length} messages`);
 
         const requestEffect = lm.streamText({ prompt }).pipe(
