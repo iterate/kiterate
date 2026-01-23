@@ -25,6 +25,7 @@ export type RequestId = typeof RequestId.Type;
 
 /** A captured console.log call - stored as plain object for JSON serialization */
 export const LogEntry = Schema.Struct({
+  level: Schema.Literal("info", "error", "warn", "debug"),
   args: Schema.Array(Schema.Unknown),
   /** ISO timestamp string */
   timestamp: Schema.String,
@@ -49,19 +50,13 @@ export const CodeEvalStartedEvent = EventSchema.make("iterate:codemode:code-eval
 /** Emitted when code evaluation completes successfully */
 export const CodeEvalDoneEvent = EventSchema.make("iterate:codemode:code-eval-done", {
   requestId: RequestId,
-  output: Schema.Struct({
-    success: Schema.Literal(true),
-    data: Schema.String,
-  }),
+  data: Schema.String,
   logs: Schema.Array(LogEntry),
 });
 
 /** Emitted when code evaluation fails */
 export const CodeEvalFailedEvent = EventSchema.make("iterate:codemode:code-eval-failed", {
   requestId: RequestId,
-  output: Schema.Struct({
-    success: Schema.Literal(false),
-    error: Schema.String,
-  }),
+  error: Schema.String,
   logs: Schema.Array(LogEntry),
 });

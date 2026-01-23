@@ -1,3 +1,4 @@
+import { execa } from "execa";
 /**
  * Codemode Processor
  *
@@ -44,9 +45,9 @@ const CODEMODE_CLOSE_TAG = "</codemode>";
 
 /** System prompt instructions for codemode */
 const CODEMODE_SYSTEM_PROMPT = dedent`
-  ## Codemode
+  You are a helpful assistant that helps users with arbitrary tasks by running JavaScript code. If you don't know how to do something, you will generate a "codemode" script which will then be executed in a secure, sandboxed environment. You can use fetch, execute shell commands, and access environment variables, so there's very little you *can't* do.
 
-  You can run JavaScript code by writing a no-args async function called \`codemode\` and surrounding it with XML blocks like this:
+  You run JavaScript code by writing a no-args async function called \`codemode\` and surrounding it with XML blocks like this:
 
   <codemode>
   async function codemode() {
@@ -56,16 +57,33 @@ const CODEMODE_SYSTEM_PROMPT = dedent`
   }
   </codemode>
 
+  You can also use the \`execa\` function to execute shell commands. For example, to list the files in the current directory, you can do this:
+  <codemode>
+  async function codemode() {
+    return await execa("ls", ["-l"]);
+  }
+  </codemode>
+
+  This will return the output of the \`ls\` command as a formatted string.
+
   The code will be evaluated and the result (or error) will be returned to you in a follow-up message.
   You can access environment variables via \`process.env\`. If you want to check which are available, run \`console.log(Object.keys(process.env))\`.
 
-  For example, if they ask you to use slack and you don't have a token, you can do this:
+  For example, if they ask you to use discord and you need a token, you could do this to find a suitable environment variable:
 
   <codemode>
   async function codemode() {
-    return Object.keys(process.env).filter(k => k.match(/SLACK/i));
+    return Object.keys(process.env).filter(k => k.match(/DISCORD/i));
   }
   </codemode>
+
+  The following global variables are available for use in your code:
+
+  - \`console\`: The console object (with log, error, warn, info, and debug methods)
+  - \`fetch\`: The fetch function
+  - \`execa\`: The execa function for running shell commands (usage docs: https://www.npmjs.com/package/execa)
+  - \`process.env\`: The environment variables
+  - \`import\`: The import function for loading external modules (e.g. \`const fs = await import("fs")\`)
 
   Use codemode when you need to fetch data, perform calculations, or interact with external services.
 `;
@@ -88,19 +106,14 @@ const formatLogs = (logs: Array<LogEntry>): string => {
 /**
  * Create a summary message for the LLM after code evaluation.
  */
-const createResultSummary = (
-  success: boolean,
-  output: string | undefined,
-  error: string | undefined,
-  logs: Array<LogEntry>,
-): string => {
-  const logsSection = logs.length > 0 ? `\n\nConsole logs:\n${formatLogs(logs)}` : "";
+const createResultSummary = (result: Result): string => {
+  const logsSection = result.logs.length > 0 ? `\n\nConsole logs:\n${formatLogs(result.logs)}` : "";
 
-  if (success) {
+  if (result.success) {
     return dedent`
       [Codemode execution completed successfully]
 
-      Output: ${output ?? "undefined"}${logsSection}
+      Output: ${result.data ?? "undefined"}${logsSection}
 
       Please let the user know how it went. If you think it might be useful to generate a new codemode block, do so.
     `;
@@ -108,7 +121,7 @@ const createResultSummary = (
     return dedent`
       [Codemode execution failed]
 
-      Error: ${error ?? "Unknown error"}${logsSection}
+      Error: ${result.error ?? "Unknown error"}${logsSection}
 
       Please let the user know what went wrong and try again if appropriate.
     `;
@@ -179,37 +192,43 @@ const extractCodemodeBlocks = (
   return blocks;
 };
 
+type ExecutionContext = {
+  console: Console;
+  fetch: typeof global.fetch;
+  execa: typeof import("execa").execa;
+  process: { env: typeof process.env };
+  require: typeof global.require;
+};
+
+type SuccessResult = { success: true; data: string; logs: Array<LogEntry> };
+type FailureResult = { success: false; error: string; logs: Array<LogEntry> };
+type Result = SuccessResult | FailureResult;
+
 /**
  * Execute code and capture console.log calls.
  * Code must define `async function codemode() { ... }`.
  */
-const executeCode = async (
-  code: string,
-): Promise<{
-  output: { success: true; data: string } | { success: false; error: string };
-  logs: Array<LogEntry>;
-}> => {
+const executeCode = async (code: string): Promise<Result> => {
   const logs: Array<LogEntry> = [];
 
+  const logger =
+    (level: LogEntry["level"]) =>
+    (...args: unknown[]) => {
+      logs.push({ level, args, timestamp: new Date().toISOString() });
+    };
   // Create a custom console that captures logs
   const capturedConsole = {
-    log: (...args: unknown[]) => {
-      logs.push({
-        args,
-        timestamp: new Date().toISOString(),
-      });
-    },
-    // Forward other console methods to real console but don't capture
-    error: console.error,
-    warn: console.warn,
-    info: console.info,
-    debug: console.debug,
+    log: logger("info"),
+    error: logger("error"),
+    warn: logger("warn"),
+    info: logger("info"),
+    debug: logger("debug"),
   };
 
   try {
     // Wrap the code to inject our console and extract the function
     const wrappedCode = `
-      return (async (console) => {
+      return (async ({console, fetch, execa, process, require}) => {
         ${code}
         if (typeof codemode !== 'function') {
           throw new Error('Code must define an async function named "codemode"');
@@ -219,21 +238,24 @@ const executeCode = async (
     `;
 
     const factory = new Function(wrappedCode)();
-    const result = await factory(capturedConsole);
+    const result = await factory({
+      console: capturedConsole as Console,
+      fetch: global.fetch,
+      execa: execa,
+      process: { env: process.env },
+      require: global.require,
+    } satisfies ExecutionContext);
 
     // Try to serialize the result
     try {
       const serialized = JSON.stringify(result);
-      return { output: { success: true, data: serialized }, logs };
+      return { success: true, data: serialized, logs };
     } catch {
-      return {
-        output: { success: true, data: JSON.stringify("[non-serializable result]") },
-        logs,
-      };
+      return { success: true, data: JSON.stringify("[non-serializable result]"), logs };
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return { output: { success: false, error: errorMessage }, logs };
+    return { success: false, error: errorMessage, logs };
   }
 };
 
@@ -388,23 +410,12 @@ export const CodemodeProcessor: Processor<never> = {
               // Run the evaluation (this is async/Promise-based)
               const result = yield* Effect.promise(() => executeCode(code));
 
-              if (result.output.success) {
-                yield* stream.append(
-                  CodeEvalDoneEvent.make({
-                    requestId,
-                    output: result.output,
-                    logs: result.logs,
-                  }),
-                );
+              if (result.success) {
+                yield* stream.append(CodeEvalDoneEvent.make({ requestId, ...result }));
                 yield* Effect.log(`code block ${requestId} completed successfully`);
 
                 // Append a fake user message to inform the LLM of the result
-                const summary = createResultSummary(
-                  true,
-                  result.output.data,
-                  undefined,
-                  result.logs,
-                );
+                const summary = createResultSummary(result);
                 yield* stream.append(
                   UserMessageEvent.make({
                     content: dedent`
@@ -415,22 +426,11 @@ export const CodemodeProcessor: Processor<never> = {
                   }),
                 );
               } else {
-                yield* stream.append(
-                  CodeEvalFailedEvent.make({
-                    requestId,
-                    output: result.output,
-                    logs: result.logs,
-                  }),
-                );
-                yield* Effect.log(`code block ${requestId} failed: ${result.output.error}`);
+                yield* stream.append(CodeEvalFailedEvent.make({ requestId, ...result }));
+                yield* Effect.log(`code block ${requestId} failed: ${result.error}`);
 
                 // Append a fake user message to inform the LLM of the failure
-                const summary = createResultSummary(
-                  false,
-                  undefined,
-                  result.output.error,
-                  result.logs,
-                );
+                const summary = createResultSummary(result);
                 yield* stream.append(UserMessageEvent.make({ content: summary }));
               }
             }

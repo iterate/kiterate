@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon, TerminalIcon } from "lucide-react";
+import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon } from "lucide-react";
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
@@ -47,42 +47,10 @@ import {
   PromptInputTextarea,
   PromptInputSubmit,
   PromptInputFooter,
-  PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { Loader } from "@/components/ai-elements/loader";
 
 type InputMode = "message" | "json";
-
-const CODEMODE_PROMPT = `You can run code by writing a no-args async function called codemode and surrounding it with xml blocks like this:
-<codemode>
-async function codemode() {
-  console.log("I can do whatever here!")
-  const res = await fetch("https://example.com")
-  return {exampleDotComIsUp: res.ok}
-}
-</codemode>
-
-You can access environment variables via process.env
-
-`;
-
-/** Button to pre-fill the input with codemode instructions */
-function CodemodeButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      className="h-8 gap-1.5 text-xs"
-      onClick={onClick}
-      disabled={disabled}
-      title="Pre-fill with codemode instructions"
-    >
-      <TerminalIcon className="size-3.5" />
-      Codemode
-    </Button>
-  );
-}
 
 export interface AgentChatProps {
   agentPath: string;
@@ -191,16 +159,6 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [aiModel, setAiModel] = useState<AiModelType | null>(null);
   const { displayMode, setRawEventsCount } = useRawMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Handle codemode button click - pre-fill input with codemode prompt
-  const handleCodemodeClick = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.value = CODEMODE_PROMPT;
-      // Dispatch input event so React picks up the change
-      textareaRef.current.dispatchEvent(new Event("input", { bubbles: true }));
-      textareaRef.current.focus();
-    }
-  }, []);
 
   const jsonTemplate = useMemo(
     () => JSON.stringify(createMessageEvent(agentPath, "Hello!"), null, 2),
@@ -479,9 +437,6 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             />
             <PromptInputFooter>
               <div className="flex items-center gap-2">
-                <PromptInputTools>
-                  <CodemodeButton disabled={isDisabled} onClick={handleCodemodeClick} />
-                </PromptInputTools>
                 {audioState.isSupported && (
                   <>
                     {audioState.devices.length > 1 && (
