@@ -90,8 +90,8 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
     expect(done.requestId).toBe(added.payload.requestId);
-    expect(done.output.success).toBe(true);
-    expect(done.output.data).toBe("42");
+    expect(done.success).toBe(true);
+    expect(done.data).toBe("42");
 
     // Should append a user message summarizing the result
     const userMsg = yield* stream.waitForEvent(UserMessageEvent);
@@ -124,7 +124,7 @@ it.scoped("captures console.log calls", () =>
 
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
-    expect(done.output.data).toBe('"done"');
+    expect(done.data).toBe('"done"');
     expect(done.logs).toHaveLength(2);
     expect(done.logs[0]?.args).toEqual(["hello", "world"]);
     expect(done.logs[1]?.args).toEqual([123]);
@@ -154,8 +154,8 @@ it.scoped("handles evaluation errors", () =>
 
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
-    expect(failed.output.success).toBe(false);
-    expect(failed.output.error).toContain("intentional error");
+    expect(failed.success).toBe(false);
+    expect(failed.error).toContain("intentional error");
 
     // Should append a user message about the failure
     const userMsg = yield* stream.waitForEvent(UserMessageEvent);
@@ -184,8 +184,8 @@ it.scoped("handles missing codemode function", () =>
 
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
-    expect(failed.output.success).toBe(false);
-    expect(failed.output.error).toContain('async function named "codemode"');
+    expect(failed.success).toBe(false);
+    expect(failed.error).toContain('async function named "codemode"');
   }),
 );
 
@@ -230,8 +230,8 @@ it.scoped("handles multiple codemode blocks", () =>
     const done1 = decodeDone(done1Event);
     const done2 = decodeDone(done2Event);
 
-    expect(done1.output.data).toBe("1");
-    expect(done2.output.data).toBe("2");
+    expect(done1.data).toBe("1");
+    expect(done2.data).toBe("2");
   }),
 );
 
@@ -259,8 +259,8 @@ it.scoped("handles non-serializable return values", () =>
 
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
-    expect(done.output.success).toBe(true);
-    expect(done.output.data).toContain("non-serializable");
+    expect(done.success).toBe(true);
+    expect(done.data).toContain("non-serializable");
   }),
 );
 
