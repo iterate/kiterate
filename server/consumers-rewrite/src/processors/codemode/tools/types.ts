@@ -1,76 +1,56 @@
 /**
- * Tool Definition Types
+ * Tool Types
  *
- * Types for defining tools that can be invoked from codemode blocks.
+ * Types for tools that can be invoked from codemode blocks.
+ * Tools are fully serializable - including their implementation as a string.
  */
-import { JSONSchema, Option, Schema } from "effect";
+import { Option, Schema } from "effect";
 
 // -------------------------------------------------------------------------------------
-// Tool Definition
+// Registered Tool
 // -------------------------------------------------------------------------------------
 
 /**
- * Defines a tool that can be called from codemode blocks.
+ * A registered tool with all data needed for execution.
+ * Derived from ToolRegisteredEvent, stored in processor state.
  *
- * @template P - The parameter schema type
- * @template R - The return type
+ * Tools are fully self-contained: the implementation is a JavaScript string
+ * that follows similar rules to codemode blocks.
  */
-export interface ToolDefinition<P = unknown, R = unknown> {
-  /** Unique tool name - becomes the function name in codemode */
-  readonly name: string;
-  /** Human-readable description for the LLM */
-  readonly description: string;
-  /** Effect Schema for parameters - used for validation and LLM documentation */
-  readonly parameters: Schema.Schema<P>;
-  /** Optional description of return value */
-  readonly returnDescription?: string;
-  /** The actual implementation */
-  readonly execute: (params: P) => Promise<R>;
-}
-
-/**
- * Type-safe helper to define a tool with full type inference.
- */
-export const defineTool = <P, R>(definition: ToolDefinition<P, R>): ToolDefinition<P, R> =>
-  definition;
-
-// -------------------------------------------------------------------------------------
-// Registered Tool Metadata
-// -------------------------------------------------------------------------------------
-
-/**
- * Metadata about a registered tool (stored in state, derived from events).
- * Does NOT include the implementation - that lives in the ToolRegistry service.
- */
-export const RegisteredToolMeta = Schema.Struct({
-  /** Tool name */
+export const RegisteredTool = Schema.Struct({
+  /** Tool name - becomes the function name in codemode */
   name: Schema.String,
   /** Description for LLM */
   description: Schema.String,
-  /** JSON Schema representation of parameters */
+  /** JSON Schema representation of parameters (for validation and LLM docs) */
   parametersJsonSchema: Schema.Unknown,
   /** Optional return description */
   returnDescription: Schema.OptionFromNullOr(Schema.String),
+  /**
+   * The tool implementation as a JavaScript string.
+   * This is the body of an async function with `params` and ExecutionContext globals in scope.
+   */
+  implementation: Schema.String,
 });
-export type RegisteredToolMeta = typeof RegisteredToolMeta.Type;
+export type RegisteredTool = typeof RegisteredTool.Type;
 
 // -------------------------------------------------------------------------------------
-// Schema Utilities
+// Helper to create RegisteredTool from event payload
 // -------------------------------------------------------------------------------------
 
 /**
- * Convert an Effect Schema to JSON Schema for LLM documentation.
+ * Create a RegisteredTool from a ToolRegisteredEvent payload.
  */
-export const toJsonSchema = <A, I, R>(schema: Schema.Schema<A, I, R>): object => {
-  return JSONSchema.make(schema);
-};
-
-/**
- * Create RegisteredToolMeta from a ToolDefinition.
- */
-export const toolDefinitionToMeta = <P, R>(tool: ToolDefinition<P, R>): RegisteredToolMeta => ({
-  name: tool.name,
-  description: tool.description,
-  parametersJsonSchema: toJsonSchema(tool.parameters),
-  returnDescription: Option.fromNullable(tool.returnDescription),
+export const fromEventPayload = (payload: {
+  name: string;
+  description: string;
+  parametersJsonSchema: unknown;
+  returnDescription: Option.Option<string>;
+  implementation: string;
+}): RegisteredTool => ({
+  name: payload.name,
+  description: payload.description,
+  parametersJsonSchema: payload.parametersJsonSchema,
+  returnDescription: payload.returnDescription,
+  implementation: payload.implementation,
 });

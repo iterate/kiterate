@@ -67,17 +67,29 @@ export const CodeEvalFailedEvent = EventSchema.make("iterate:codemode:code-eval-
 
 /**
  * Emitted when a tool is registered and available for use in codemode blocks.
- * The actual implementation is provided separately via the ToolRegistry service.
+ *
+ * Tools are fully self-contained: the implementation is a JavaScript string
+ * that follows similar rules to codemode blocks. The implementation is the
+ * body of an async function that receives:
+ * - `params` - the validated parameters (validated against parametersJsonSchema)
+ * - `fetch`, `execa`, `console`, `process`, `require` from ExecutionContext
+ *
+ * Example implementation: `return await fetch(params.url).then(r => r.json());`
  */
 export const ToolRegisteredEvent = EventSchema.make("iterate:codemode:tool-registered", {
   /** Unique tool name - becomes the function name in codemode */
   name: Schema.String,
   /** Human-readable description for the LLM */
   description: Schema.String,
-  /** JSON Schema representation of parameters (for LLM documentation) */
+  /** JSON Schema representation of parameters (for LLM documentation and validation) */
   parametersJsonSchema: Schema.Unknown,
   /** Optional description of return value */
   returnDescription: Schema.OptionFromNullOr(Schema.String),
+  /**
+   * The tool implementation as a JavaScript string.
+   * This is the body of an async function with `params` and ExecutionContext globals in scope.
+   */
+  implementation: Schema.String,
 });
 
 /** Emitted when a tool is unregistered and no longer available */

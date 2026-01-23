@@ -5,7 +5,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
-import { CodemodeProcessorLayer, toolRegistryEmptyLayer } from "./processors/codemode/index.js";
+import { CodemodeProcessorLayer } from "./processors/codemode/index.js";
 import { LlmLoopProcessorLayer } from "./processors/llm-loop/index.js";
 import { ServerLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
@@ -38,9 +38,6 @@ const LanguageModelLive = OpenAiLanguageModel.layer({
   },
 }).pipe(Layer.provide(OpenAiClientLive));
 
-// Empty tool registry (tools will be registered via events)
-const ToolRegistryLive = toolRegistryEmptyLayer;
-
 // Processors (background processes that run with the server)
 const ProcessorsLive = Layer.mergeAll(LlmLoopProcessorLayer, CodemodeProcessorLayer);
 
@@ -49,7 +46,6 @@ const StreamManagerLive = ProcessorsLive.pipe(
   Layer.provideMerge(StreamManager.liveLayer),
   Layer.provide(StreamStorageLive),
   Layer.provide(LanguageModelLive),
-  Layer.provide(ToolRegistryLive),
 );
 
 const MainLive = ServerLive(port).pipe(

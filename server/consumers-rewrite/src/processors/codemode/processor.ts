@@ -16,7 +16,7 @@ import { execa } from "execa";
  * ```
  */
 import dedent from "dedent";
-import { Context, Effect, HashSet, Option, Schema, Stream } from "effect";
+import { Effect, HashSet, Option, Schema, Stream } from "effect";
 
 import { Event, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
@@ -33,8 +33,7 @@ import {
   ToolRegisteredEvent,
   ToolUnregisteredEvent,
 } from "./events.js";
-import { ToolRegistry } from "./tools/service.js";
-import { RegisteredToolMeta } from "./tools/types.js";
+import { RegisteredTool, fromEventPayload } from "./tools/types.js";
 import { generateToolSignature } from "./tools/typescript-gen.js";
 
 // -------------------------------------------------------------------------------------
@@ -108,7 +107,7 @@ const formatLogs = (logs: Array<LogEntry>): string => {
  * Generate a system prompt section for a registered tool.
  * Includes a TypeScript function signature for better LLM understanding.
  */
-const generateToolPrompt = (tool: RegisteredToolMeta): string => {
+const generateToolPrompt = (tool: RegisteredTool): string => {
   const signature = generateToolSignature({
     name: tool.name,
     description: tool.description,
@@ -182,8 +181,8 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
   inProgress: Schema.Array(RequestId),
   /** Whether we've emitted the system prompt edit */
   systemPromptEmitted: Schema.Boolean,
-  /** Registered tools metadata (for system prompt generation) */
-  registeredTools: Schema.Array(RegisteredToolMeta),
+  /** Registered tools (with implementations) */
+  registeredTools: Schema.Array(RegisteredTool),
   /** Tool names for which we've emitted system prompt edits */
   toolPromptsEmitted: Schema.HashSet(Schema.String),
 }) {
@@ -236,7 +235,6 @@ const extractCodemodeBlocks = (
 
 /**
  * A tool function that can be called from codemode.
- * Wraps the actual tool implementation with parameter validation.
  */
 type ToolFunction = (params: unknown) => Promise<unknown>;
 
@@ -253,6 +251,60 @@ type ExecutionContext = {
 type SuccessResult = { success: true; data: string; logs: Array<LogEntry> };
 type FailureResult = { success: false; error: string; logs: Array<LogEntry> };
 type Result = SuccessResult | FailureResult;
+
+/**
+ * Create a tool function from a RegisteredTool's implementation string.
+ *
+ * The implementation string is the body of an async function that receives:
+ * - `params` - the validated parameters
+ * - `fetch`, `execa`, `console`, `process`, `require` from ExecutionContext
+ */
+const createToolFunction = (tool: RegisteredTool): ToolFunction => {
+  // Build a function that wraps the implementation string
+  // The implementation has access to: params, fetch, execa, console, process, require
+  const wrappedCode = `
+    return async function ${tool.name}(params, context) {
+      const { fetch, execa, console, process, require } = context;
+      ${tool.implementation}
+    };
+  `;
+
+  try {
+    const fn = new Function(wrappedCode)();
+    return async (params: unknown) => {
+      // TODO: Validate params against parametersJsonSchema here
+      const context = {
+        fetch: global.fetch,
+        execa: execa,
+        console: global.console,
+        process: { env: process.env },
+        require: global.require,
+      };
+      return fn(params, context);
+    };
+  } catch (error) {
+    // If the implementation is invalid, return a function that throws
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return async () => {
+      throw new Error(`Tool "${tool.name}" has invalid implementation: ${errorMessage}`);
+    };
+  }
+};
+
+/**
+ * Build a map of tool functions from registered tools.
+ */
+const buildToolsMap = (
+  registeredTools: ReadonlyArray<RegisteredTool>,
+): ReadonlyMap<string, ToolFunction> => {
+  const tools = new Map<string, ToolFunction>();
+
+  for (const tool of registeredTools) {
+    tools.set(tool.name, createToolFunction(tool));
+  }
+
+  return tools;
+};
 
 /**
  * Execute code and capture console.log calls.
@@ -418,24 +470,19 @@ const reduce = (state: State, event: Event): State => {
     });
   }
 
-  // Handle tool registration
+  // Handle tool registration - store the full tool including implementation
   if (ToolRegisteredEvent.is(event)) {
-    const toolMeta: RegisteredToolMeta = {
-      name: event.payload.name,
-      description: event.payload.description,
-      parametersJsonSchema: event.payload.parametersJsonSchema,
-      returnDescription: event.payload.returnDescription,
-    };
+    const tool = fromEventPayload(event.payload);
     // Replace existing tool with same name or add new
     const existingIndex = state.registeredTools.findIndex((t) => t.name === event.payload.name);
     const newTools =
       existingIndex >= 0
         ? [
             ...state.registeredTools.slice(0, existingIndex),
-            toolMeta,
+            tool,
             ...state.registeredTools.slice(existingIndex + 1),
           ]
-        : [...state.registeredTools, toolMeta];
+        : [...state.registeredTools, tool];
     return State.make({
       ...base,
       registeredTools: newTools,
@@ -458,39 +505,11 @@ const reduce = (state: State, event: Event): State => {
 // Processor
 // -------------------------------------------------------------------------------------
 
-/**
- * Build a map of tool functions from the ToolRegistry for code execution.
- * Each tool function wraps the tool's execute method with the parameter validation.
- */
-const buildToolsMap = (
-  registry: Context.Tag.Service<typeof ToolRegistry>,
-  registeredTools: ReadonlyArray<RegisteredToolMeta>,
-): ReadonlyMap<string, ToolFunction> => {
-  const tools = new Map<string, ToolFunction>();
-
-  for (const toolMeta of registeredTools) {
-    const toolImpl = registry.get(toolMeta.name);
-    if (Option.isSome(toolImpl)) {
-      const tool = toolImpl.value;
-      // Wrap the tool's execute function
-      // Note: We could add schema validation here in the future
-      tools.set(toolMeta.name, async (params: unknown) => {
-        return tool.execute(params);
-      });
-    }
-  }
-
-  return tools;
-};
-
-export const CodemodeProcessor: Processor<ToolRegistry> = {
+export const CodemodeProcessor: Processor<never> = {
   name: "codemode",
 
   run: (stream) =>
     Effect.gen(function* () {
-      // Get the tool registry
-      const toolRegistry = yield* ToolRegistry;
-
       // Phase 1: Hydrate from history
       let state = yield* stream.read().pipe(Stream.runFold(State.initial, reduce));
 
@@ -525,12 +544,12 @@ export const CodemodeProcessor: Processor<ToolRegistry> = {
             if (ToolRegisteredEvent.is(event)) {
               const toolName = event.payload.name;
               if (!HashSet.has(state.toolPromptsEmitted, toolName)) {
-                const toolMeta = state.registeredTools.find((t) => t.name === toolName);
-                if (toolMeta) {
+                const tool = state.registeredTools.find((t) => t.name === toolName);
+                if (tool) {
                   yield* Effect.log(`emitting system prompt for tool: ${toolName}`).pipe(
                     withSpanFromEvent("codemode.emit-tool-prompt", event),
                   );
-                  const promptContent = generateToolPrompt(toolMeta);
+                  const promptContent = generateToolPrompt(tool);
                   yield* stream.append(
                     SystemPromptEditEvent.make({
                       mode: "append",
@@ -583,8 +602,8 @@ export const CodemodeProcessor: Processor<ToolRegistry> = {
                 yield* Effect.log(`evaluating code block ${requestId}`);
                 yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
 
-                // Build the tools map from the registry
-                const tools = buildToolsMap(toolRegistry, state.registeredTools);
+                // Build the tools map from registered tools
+                const tools = buildToolsMap(state.registeredTools);
 
                 // Run the evaluation (this is async/Promise-based)
                 const result = yield* Effect.promise(() => executeCode(code, tools));
