@@ -2,7 +2,9 @@
  * Simple SSE helpers for durable-stream
  */
 import { HttpServerResponse } from "@effect/platform";
-import { Stream } from "effect";
+import { Schema, Stream } from "effect";
+
+import { Event } from "./domain.js";
 
 export interface SseEvent {
   readonly event: string;
@@ -24,10 +26,13 @@ export const encode = (event: SseEvent): string => {
 };
 
 /**
- * Encode a data event (most common case)
+ * Encode an Event to SSE data format with proper Schema encoding.
+ * This ensures Option fields are properly transformed (e.g., Option -> null).
  */
-export const data = (payload: unknown): string =>
-  encode({ event: "data", data: JSON.stringify(payload) });
+export const data = (event: Event): string => {
+  const encoded = Schema.encodeSync(Event)(event);
+  return encode({ event: "data", data: JSON.stringify(encoded) });
+};
 
 /**
  * Encode a control event

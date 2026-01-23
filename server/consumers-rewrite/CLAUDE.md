@@ -112,13 +112,14 @@ Storage.read()     PubSub.subscribe()
 
 ## Domain Types
 
-| Type         | Description                                                            |
-| ------------ | ---------------------------------------------------------------------- |
-| `StreamPath` | Branded string, e.g. `"agent/session-123"`                             |
-| `Offset`     | Branded string, zero-padded numeric for ordering                       |
-| `EventType`  | Branded string, e.g. `"iterate:agent:action:send-user-message:called"` |
-| `EventInput` | `{ type, payload, version? }` - what clients send                      |
-| `Event`      | EventInput + `{ offset, createdAt }` - what storage returns            |
+| Type           | Description                                                            |
+| -------------- | ---------------------------------------------------------------------- |
+| `StreamPath`   | Branded string, e.g. `"agent/session-123"`                             |
+| `Offset`       | Branded string, zero-padded numeric for ordering                       |
+| `EventType`    | Branded string, e.g. `"iterate:agent:action:send-user-message:called"` |
+| `EventInput`   | `{ type, payload, version? }` - what clients send                      |
+| `Event`        | EventInput + `{ offset, createdAt, trace }` - what storage returns     |
+| `TraceContext` | `{ traceId, spanId, parentSpanId }` - provenance tracking              |
 
 ## Key Event Types
 
@@ -163,6 +164,10 @@ payload:
 offset: "0000000000000001"
 createdAt: "2026-01-20T12:00:00.000Z"
 version: "1"
+trace:
+  traceId: "abc123"
+  spanId: "span-1"
+  parentSpanId: null
 ---
 type: "iterate:llm-loop:response:sse"
 payload:
@@ -170,9 +175,11 @@ payload:
 offset: "0000000000000002"
 createdAt: "2026-01-20T12:00:00.100Z"
 version: "1"
+trace:
+  traceId: "abc123"
+  spanId: "span-2"
+  parentSpanId: "span-1"
 ```
-
-Offset counter tracked separately in `.data/streams/{path}.yaml.offset`.
 
 ## Debugging Sessions
 
@@ -248,3 +255,45 @@ export const liveLayer = Layer.effect(StreamManager, make);
 const manager = yield* StreamManager;
 yield* manager.append({ path, event });
 ```
+
+## Event Tracing
+
+Events carry provenance information via `TraceContext`, using Effect's built-in tracing:
+
+```typescript
+// TraceContext embedded in every Event
+{
+  traceId: "abc123",      // Groups all related events in the same trace
+  spanId: "span-1",       // Identifies the span that created this event
+  parentSpanId: "span-0"  // Links to parent span (null if root)
+}
+```
+
+### How It Works
+
+1. **HTTP creates root span**: `POST /agents/:path` wraps append in `Effect.withSpan("http.append-event")`
+2. **EventStream captures trace**: `append()` reads current span via `Effect.currentSpan`
+3. **Processors inherit trace**: Use `withTraceFromEvent(event)` to link work to originating event
+
+```typescript
+// In processors - inherit trace context from the triggering event
+Stream.runForEach((event) =>
+  Effect.gen(function* () {
+    // ... process event
+  }).pipe(withTraceFromEvent(event)),
+);
+```
+
+### Span Hierarchy
+
+```
+Trace: abc123
+├─ http.append-event (root span from HTTP POST)
+│   └─ Event: UserMessageEvent { trace: { traceId: abc123, spanId: span-1 } }
+├─ llm-loop.request (parent = span-1)
+│   └─ Events: RequestStartedEvent, ResponseSseEvent[], RequestEndedEvent
+└─ codemode.eval (continues same trace)
+    └─ Events: CodeEvalStartedEvent, CodeEvalDoneEvent
+```
+
+All events in a request chain share the same `traceId`, enabling end-to-end tracing.

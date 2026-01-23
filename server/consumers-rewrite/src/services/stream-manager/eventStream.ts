@@ -8,6 +8,7 @@ import { DateTime, Effect, PubSub, Schema, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
+import { fromCurrentSpan } from "../../tracing/helpers.js";
 
 // -------------------------------------------------------------------------------------
 // State (derived from event history)
@@ -66,7 +67,8 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
       Effect.gen(function* () {
         const nextOffset = formatOffset(offsetToNumber(state.lastOffset) + 1);
         const createdAt = yield* DateTime.now;
-        const event = Event.make({ ...eventInput, path, offset: nextOffset, createdAt });
+        const trace = yield* fromCurrentSpan;
+        const event = Event.make({ ...eventInput, path, offset: nextOffset, createdAt, trace });
 
         yield* storage.append(event);
         state = reduce(state, event);

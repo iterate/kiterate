@@ -49,6 +49,7 @@ const appendHandler = Effect.gen(function* () {
 
   return HttpServerResponse.empty({ status: 204 });
 }).pipe(
+  Effect.withSpan("http.append-event"),
   Effect.tapError((error) => Effect.logError("Request failed", error)),
   Effect.catchTag("ParseError", (error) =>
     HttpServerResponse.json({ error: error.message }, { status: 400 }),

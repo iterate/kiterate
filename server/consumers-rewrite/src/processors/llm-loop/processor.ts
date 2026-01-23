@@ -15,6 +15,7 @@ import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
 import { makeActiveRequestFiber } from "./activeRequestFiber.js";
+import { withTraceFromEvent } from "../../tracing/helpers.js";
 import {
   RequestCancelledEvent,
   RequestEndedEvent,
@@ -174,55 +175,58 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
 
       const activeRequestFiber = yield* makeActiveRequestFiber();
 
-      const startRequest = ({ history }: { history: History }) =>
-        Effect.gen(function* () {
-          // Build prompt with system message
-          // Read systemPrompt from state at execution time (not trigger time)
-          // so that any SystemPromptEditEvents processed during debounce are included
-          const prompt: Prompt.MessageEncoded[] = [
-            { role: "system", content: state.systemPrompt },
-            ...history,
-          ];
+      const startRequest = Effect.fn("llm-loop.request")(function* ({
+        history,
+        systemPrompt,
+      }: {
+        history: History;
+        systemPrompt: string;
+      }) {
+        // Build prompt with system message
+        const prompt: Prompt.MessageEncoded[] = [
+          { role: "system", content: systemPrompt },
+          ...history,
+        ];
 
-          const { offset: requestOffset } = yield* stream.append(
-            RequestStartedEvent.make({ requestParams: prompt }),
+        const { offset: requestOffset } = yield* stream.append(
+          RequestStartedEvent.make({ requestParams: prompt }),
+        );
+
+        yield* Effect.log(`triggering generation, history=${history.length} messages`);
+
+        const requestEffect = lm.streamText({ prompt }).pipe(
+          Stream.runForEach((part) =>
+            stream.append(ResponseSseEvent.make({ part, requestOffset })),
+          ),
+          Effect.onExit((exit) =>
+            Exit.match(exit, {
+              onSuccess: () =>
+                stream.append(RequestEndedEvent.make({ requestOffset })).pipe(Effect.asVoid),
+              onFailure: (cause) =>
+                Effect.gen(function* () {
+                  yield* Effect.logError("generation failed", cause);
+                  yield* stream.append(
+                    RequestCancelledEvent.make({
+                      requestOffset,
+                      reason: Cause.isInterruptedOnly(cause) ? "interrupted" : "error",
+                      message: Cause.pretty(cause),
+                    }),
+                  );
+                }),
+            }),
+          ),
+          Effect.catchAllCause(() => Effect.void),
+        );
+
+        const previousRequestOffset = yield* activeRequestFiber.run(requestOffset, requestEffect);
+        if (Option.isSome(previousRequestOffset)) {
+          yield* stream.append(
+            RequestInterruptedEvent.make({
+              requestOffset: previousRequestOffset.value,
+            }),
           );
-
-          yield* Effect.log(`triggering generation, history=${history.length} messages`);
-
-          const requestEffect = lm.streamText({ prompt }).pipe(
-            Stream.runForEach((part) =>
-              stream.append(ResponseSseEvent.make({ part, requestOffset })),
-            ),
-            Effect.onExit((exit) =>
-              Exit.match(exit, {
-                onSuccess: () =>
-                  stream.append(RequestEndedEvent.make({ requestOffset })).pipe(Effect.asVoid),
-                onFailure: (cause) =>
-                  Effect.gen(function* () {
-                    yield* Effect.logError("generation failed", cause);
-                    yield* stream.append(
-                      RequestCancelledEvent.make({
-                        requestOffset,
-                        reason: Cause.isInterruptedOnly(cause) ? "interrupted" : "error",
-                        message: Cause.pretty(cause),
-                      }),
-                    );
-                  }),
-              }),
-            ),
-            Effect.catchAllCause(() => Effect.void),
-          );
-
-          const previousRequestOffset = yield* activeRequestFiber.run(requestOffset, requestEffect);
-          if (Option.isSome(previousRequestOffset)) {
-            yield* stream.append(
-              RequestInterruptedEvent.make({
-                requestOffset: previousRequestOffset.value,
-              }),
-            );
-          }
-        });
+        }
+      });
 
       const debounced = yield* makeDebounced(startRequest, llmDebounce);
 
@@ -236,7 +240,13 @@ export const LlmLoopProcessor: Processor<LanguageModel.LanguageModel> = {
             if (!state.enabled) return;
             if (!state.shouldTriggerLlmResponse) return;
 
-            yield* debounced.trigger({ history: state.history });
+            // Trigger LLM request (debounced) - pass event for trace context
+            yield* debounced
+              .trigger({
+                history: state.history,
+                systemPrompt: state.systemPrompt,
+              })
+              .pipe(withTraceFromEvent(event));
           }),
         ),
       );

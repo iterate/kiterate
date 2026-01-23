@@ -1,4 +1,6 @@
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai";
+import * as Otlp from "@effect/opentelemetry/Otlp";
+import * as OtlpSerialization from "@effect/opentelemetry/OtlpSerialization";
 import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
@@ -11,6 +13,12 @@ import * as StreamStorage from "./services/stream-storage/index.js";
 
 const port = parseInt(process.env.PORT ?? "3000", 10);
 
+// Jaeger tracing (local OTLP endpoint for debugging)
+const TracingLive = Otlp.layer({
+  baseUrl: "http://localhost:4318",
+  resource: { serviceName: "kiterate" },
+}).pipe(Layer.provide(FetchHttpClient.layer), Layer.provide(OtlpSerialization.layerJson));
+
 const StreamStorageLive = StreamStorage.fileSystemLayer(".data/streams").pipe(
   Layer.provide(NodeContext.layer),
 );
@@ -20,10 +28,15 @@ const OpenAiClientLive = OpenAiClient.layerConfig({
   apiKey: Config.redacted("OPENAI_API_KEY"),
 }).pipe(Layer.provide(FetchHttpClient.layer));
 
-// Language model using gpt-4o
-const LanguageModelLive = OpenAiLanguageModel.layer({ model: "gpt-4o" }).pipe(
-  Layer.provide(OpenAiClientLive),
-);
+// Language model using gpt-5.2-codex with low reasoning effort
+const LanguageModelLive = OpenAiLanguageModel.layer({
+  model: "gpt-5.2-codex",
+  config: {
+    reasoning: {
+      effort: "low",
+    },
+  },
+}).pipe(Layer.provide(OpenAiClientLive));
 
 // Processors (background processes that run with the server)
 const ProcessorsLive = Layer.mergeAll(LlmLoopProcessorLayer, CodemodeProcessorLayer);
@@ -35,6 +48,9 @@ const StreamManagerLive = ProcessorsLive.pipe(
   Layer.provide(LanguageModelLive),
 );
 
-const MainLive = ServerLive(port).pipe(Layer.provide(StreamManagerLive));
+const MainLive = ServerLive(port).pipe(
+  Layer.provide(StreamManagerLive),
+  Layer.provide(TracingLive),
+);
 
 NodeRuntime.runMain(Layer.launch(MainLive));

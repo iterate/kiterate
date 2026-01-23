@@ -19,6 +19,7 @@ import { CodemodeProcessor } from "./processor.js";
 const decodeDone = (event: { payload: unknown }) => {
   const payload = event.payload as {
     requestId: string;
+    success: true;
     data: string;
     logs: Array<{ args: unknown[]; timestamp: string }>;
   };
@@ -28,6 +29,7 @@ const decodeDone = (event: { payload: unknown }) => {
 const decodeFailed = (event: { payload: unknown }) => {
   const payload = event.payload as {
     requestId: string;
+    success: false;
     error: string;
     logs: Array<{ args: unknown[]; timestamp: string }>;
   };
@@ -90,6 +92,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
     expect(done.requestId).toBe(added.payload.requestId);
+    expect(done.success).toBe(true);
     expect(done.data).toBe("42");
 
     // Should append a user message summarizing the result
@@ -153,6 +156,7 @@ it.scoped("handles evaluation errors", () =>
 
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
+    expect(failed.success).toBe(false);
     expect(failed.error).toContain("intentional error");
 
     // Should append a user message about the failure
@@ -182,6 +186,7 @@ it.scoped("handles missing codemode function", () =>
 
     const failedEvent = yield* stream.waitForEvent(CodeEvalFailedEvent);
     const failed = decodeFailed(failedEvent);
+    expect(failed.success).toBe(false);
     expect(failed.error).toContain('async function named "codemode"');
   }),
 );
@@ -256,6 +261,7 @@ it.scoped("handles non-serializable return values", () =>
 
     const doneEvent = yield* stream.waitForEvent(CodeEvalDoneEvent);
     const done = decodeDone(doneEvent);
+    expect(done.success).toBe(true);
     expect(done.data).toContain("non-serializable");
   }),
 );

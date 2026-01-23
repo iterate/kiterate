@@ -7,10 +7,14 @@
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
-import { Chunk, DateTime, Effect, Layer, Stream } from "effect";
+import { Chunk, DateTime, Effect, Layer, Option, Stream } from "effect";
 
 import { Event, EventType, Offset, StreamPath } from "../../domain.js";
+import { SpanId, TraceContext, TraceId } from "../../tracing/traceContext.js";
 import * as StreamStorage from "./index.js";
+
+/** Counter for generating unique span IDs in tests */
+let testSpanCounter = 0;
 
 /** Helper to create a full Event with all required fields */
 const makeEvent = (
@@ -26,6 +30,11 @@ const makeEvent = (
       path,
       offset: Offset.make(offset.toString().padStart(16, "0")),
       createdAt,
+      trace: TraceContext.make({
+        traceId: TraceId.make(`test-trace-${path}`),
+        spanId: SpanId.make(`test-span-${testSpanCounter++}`),
+        parentSpanId: Option.none(),
+      }),
     });
   });
 

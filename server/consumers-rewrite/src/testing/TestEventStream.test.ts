@@ -3,7 +3,7 @@ import { Effect, Schema } from "effect";
 
 import { StreamPath } from "../domain.js";
 import { EventSchema } from "../events.js";
-import { makeTestEventStream } from "./TestSimpleStream.js";
+import { makeTestEventStream } from "./TestEventStream.js";
 
 // Simple test event schemas
 const PingEvent = EventSchema.make("test:ping", {});
