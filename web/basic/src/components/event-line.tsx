@@ -31,6 +31,29 @@ function getMessageText(content: { type: string; text: string }[]): string {
     .join("");
 }
 
+/**
+ * Transform XML-like tags in text into collapsible <details> elements.
+ * Matches patterns like <tagname>...</tagname> and wraps them.
+ */
+function collapseXmlTags(text: string): string {
+  // Match XML-like tags: <tagname>content</tagname> or <tagname attr="value">content</tagname>
+  // Using a regex that handles multiline content
+  const xmlTagPattern = /<([a-zA-Z][\w-]*)[^>]*>([\s\S]*?)<\/\1>/g;
+
+  return text.replace(xmlTagPattern, (_match, tagName, content) => {
+    const trimmedContent = content.trim();
+
+    return `<details>
+<summary><code>&lt;${tagName}&gt;</code></summary>
+
+\`\`\`
+${trimmedContent}
+\`\`\`
+
+</details>`;
+  });
+}
+
 /** Format duration as m:ss */
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -117,7 +140,7 @@ const MessageBubble = memo(function MessageBubble({
               {text}
             </pre>
           ) : (
-            <MessageResponse>{text}</MessageResponse>
+            <MessageResponse>{collapseXmlTags(text)}</MessageResponse>
           )
         ) : hasAudio ? (
           <span className="opacity-60 italic text-sm">[Audio message]</span>

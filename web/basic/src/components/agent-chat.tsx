@@ -158,7 +158,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [selectedRawEventIndex, setSelectedRawEventIndex] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("message");
   const [aiModel, setAiModel] = useState<AiModelType | null>(null);
-  const [ddgToolRegistered, setDdgToolRegistered] = useState(false);
+  const [searchToolRegistered, setSearchToolRegistered] = useState(false);
   const { displayMode, setRawEventsCount } = useRawMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -259,37 +259,59 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
     setSendError(null);
   };
 
-  // Handle registering the DuckDuckGo search tool
-  const handleRegisterDdgTool = async () => {
+  // Handle registering the Exa search tool
+  const handleRegisterSearchTool = async () => {
     setSendError(null);
     try {
       const toolEvent = {
         type: "iterate:codemode:tool-registered",
         payload: {
-          name: "duckDuckGoSearch",
+          name: "exaSearch",
           description:
-            "Search the web using DuckDuckGo. Returns the titles and URLs of the first page of search results. Use this when you need to find information on the internet.",
+            "Search the web using Exa AI. Returns titles, URLs, and snippets from search results. Use this when you need to find information on the internet.",
           parametersJsonSchema: {
             type: "object",
             properties: {
               query: { type: "string", description: "The search query" },
+              numResults: {
+                type: "number",
+                description: "Number of results to return (default: 10, max: 100)",
+              },
             },
             required: ["query"],
             additionalProperties: false,
           },
-          returnDescription: "Array of search results with title and URL",
+          returnDescription: "Array of search results with title, url, and snippet",
           implementation: dedent`
-            const DDG = await import("duck-duck-scrape");
-            const results = await DDG.search(params.query, { safeSearch: DDG.SafeSearchType.MODERATE });
-            return results.results.slice(0, 10).map(r => ({ title: r.title, url: r.url }));
+            const response = await fetch("https://api.exa.ai/search", {
+              method: "POST",
+              headers: {
+                "x-api-key": process.env.EXA_API_KEY,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                query: params.query,
+                numResults: params.numResults || 10,
+                text: true,
+              }),
+            });
+            if (!response.ok) {
+              throw new Error("Exa search failed: " + response.status + " " + (await response.text()));
+            }
+            const data = await response.json();
+            return data.results.map(r => ({
+              title: r.title,
+              url: r.url,
+              snippet: r.text?.slice(0, 500),
+            }));
           `,
         },
       };
       const result = await sendRawJson(apiURL, agentPath, JSON.stringify(toolEvent));
       if (!result.ok) {
-        setSendError(result.error ?? "Failed to register DuckDuckGo tool");
+        setSendError(result.error ?? "Failed to register Exa search tool");
       } else {
-        setDdgToolRegistered(true);
+        setSearchToolRegistered(true);
       }
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Failed to register tool");
@@ -453,15 +475,15 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
               </Button>
             </div>
             <Button
-              variant={ddgToolRegistered ? "secondary" : "outline"}
+              variant={searchToolRegistered ? "secondary" : "outline"}
               size="sm"
               className="h-8 text-xs gap-1"
-              disabled={ddgToolRegistered}
-              onClick={handleRegisterDdgTool}
-              title="Add DuckDuckGo web search tool"
+              disabled={searchToolRegistered}
+              onClick={handleRegisterSearchTool}
+              title="Add Exa web search tool"
             >
               <SearchIcon className="size-3" />
-              {ddgToolRegistered ? "Search Added" : "Add Search"}
+              {searchToolRegistered ? "Search Added" : "Add Search"}
             </Button>
           </div>
           <div className="flex items-center gap-2">
