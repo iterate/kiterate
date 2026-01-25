@@ -70,13 +70,18 @@ describe("EventSchema", () => {
       expect(UserMessageEvent.is(event)).toBe(false);
     });
 
-    it("returns false for invalid payload", () => {
+    it("returns true for matching type regardless of payload (type-only check)", () => {
+      // Note: .is() only checks the event type, not payload structure.
+      // For runtime payload validation, use .decode() or .decodeOption()
       const event = EventInput.make({
         type: EventType.make("iterate:agent:action:send-user-message:called"),
         payload: { wrong: "field" } as Payload,
       });
 
-      expect(UserMessageEvent.is(event)).toBe(false);
+      // .is() returns true because the type matches
+      expect(UserMessageEvent.is(event)).toBe(true);
+      // .decodeOption() returns None because the payload is invalid
+      expect(Option.isNone(UserMessageEvent.decodeOption(event))).toBe(true);
     });
 
     it("works in switch-like patterns", () => {

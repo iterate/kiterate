@@ -40,7 +40,6 @@ export const EventSchema = {
     type P = Schema.Struct.Type<Fields>;
     const decodePayloadOption = Schema.decodeUnknownOption(payloadSchema);
     const decodePayload = Schema.decodeUnknown(payloadSchema);
-    const isPayload = Schema.is(payloadSchema);
 
     return {
       type: eventType,
@@ -69,8 +68,11 @@ export const EventSchema = {
         }
         return decodePayload(event.payload);
       },
+      // Type guard - only checks the event type, not payload structure.
+      // The payload type is guaranteed by how events are created via .make()
+      // For runtime validation, use .decode() or .decodeOption()
       is: <E extends EventInput | Event>(event: E): event is E & { type: Type; payload: P } =>
-        String(event.type) === type && isPayload(event.payload),
+        String(event.type) === type,
     };
   },
 };

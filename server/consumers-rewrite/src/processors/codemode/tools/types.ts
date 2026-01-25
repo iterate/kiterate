@@ -40,17 +40,24 @@ export type RegisteredTool = typeof RegisteredTool.Type;
 
 /**
  * Create a RegisteredTool from a ToolRegisteredEvent payload.
+ * Handles both raw (encoded) and decoded forms of returnDescription.
  */
 export const fromEventPayload = (payload: {
   name: string;
   description: string;
   parametersJsonSchema: unknown;
-  returnDescription: Option.Option<string>;
+  returnDescription: Option.Option<string> | string | null | undefined;
   implementation: string;
 }): RegisteredTool => ({
   name: payload.name,
   description: payload.description,
   parametersJsonSchema: payload.parametersJsonSchema,
-  returnDescription: payload.returnDescription,
+  // Handle both decoded (Option) and raw (string/null) forms
+  returnDescription:
+    typeof payload.returnDescription === "string"
+      ? Option.some(payload.returnDescription)
+      : payload.returnDescription == null
+        ? Option.none()
+        : payload.returnDescription,
   implementation: payload.implementation,
 });

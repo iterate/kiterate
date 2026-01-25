@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon } from "lucide-react";
+import { CodeIcon, MessageCircleIcon, AlertCircleIcon, MicIcon, SearchIcon } from "lucide-react";
+import dedent from "dedent";
 import { FeedItemRenderer } from "./event-line";
 import { SerializedObjectCodeBlock } from "./serialized-object-code-block";
 import {
@@ -157,6 +158,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [selectedRawEventIndex, setSelectedRawEventIndex] = useState<number | null>(null);
   const [inputMode, setInputMode] = useState<InputMode>("message");
   const [aiModel, setAiModel] = useState<AiModelType | null>(null);
+  const [ddgToolRegistered, setDdgToolRegistered] = useState(false);
   const { displayMode, setRawEventsCount } = useRawMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -255,6 +257,43 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
       jsonInput.reset(jsonTemplate);
     }
     setSendError(null);
+  };
+
+  // Handle registering the DuckDuckGo search tool
+  const handleRegisterDdgTool = async () => {
+    setSendError(null);
+    try {
+      const toolEvent = {
+        type: "iterate:codemode:tool-registered",
+        payload: {
+          name: "duckDuckGoSearch",
+          description:
+            "Search the web using DuckDuckGo. Returns the titles and URLs of the first page of search results. Use this when you need to find information on the internet.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "The search query" },
+            },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          returnDescription: "Array of search results with title and URL",
+          implementation: dedent`
+            const DDG = await import("duck-duck-scrape");
+            const results = await DDG.search(params.query, { safeSearch: DDG.SafeSearchType.MODERATE });
+            return results.results.slice(0, 10).map(r => ({ title: r.title, url: r.url }));
+          `,
+        },
+      };
+      const result = await sendRawJson(apiURL, agentPath, JSON.stringify(toolEvent));
+      if (!result.ok) {
+        setSendError(result.error ?? "Failed to register DuckDuckGo tool");
+      } else {
+        setDdgToolRegistered(true);
+      }
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Failed to register tool");
+    }
   };
 
   // Handle AI model change - always sends config event to server
@@ -413,6 +452,17 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
                 Grok
               </Button>
             </div>
+            <Button
+              variant={ddgToolRegistered ? "secondary" : "outline"}
+              size="sm"
+              className="h-8 text-xs gap-1"
+              disabled={ddgToolRegistered}
+              onClick={handleRegisterDdgTool}
+              title="Add DuckDuckGo web search tool"
+            >
+              <SearchIcon className="size-3" />
+              {ddgToolRegistered ? "Search Added" : "Add Search"}
+            </Button>
           </div>
           <div className="flex items-center gap-2">
             {isStreaming && (
