@@ -4,8 +4,8 @@ import fs from "node:fs";
 // Usage: pnpm dev [backend] [frontend]
 // Defaults: backend=durable-stream, frontend=basic
 
-const BACKEND_PORT = 3001;
-const FRONTEND_PORT = 3000;
+const BACKEND_PORT = 7001;
+const FRONTEND_PORT = 7000;
 
 const backendArg = process.argv[2] ?? "durable-stream";
 const frontendArg = process.argv[3] ?? "basic";
@@ -112,7 +112,10 @@ console.log(
 spawnPnpm(["--filter", serverPkg, "dev"], { PORT: String(BACKEND_PORT) });
 
 // Start web frontend
-spawnPnpm(["--filter", webPkg, "dev"], { BACKEND_PORT: String(BACKEND_PORT) });
+spawnPnpm(["--filter", webPkg, "dev"], {
+  PORT: String(FRONTEND_PORT),
+  BACKEND_PORT: String(BACKEND_PORT),
+});
 
 for (const child of children) {
   child.on("exit", (code) => {
