@@ -6,7 +6,7 @@ import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
 import { ClockProcessorLayer } from "./processors/clock/index.js";
-import { CodemodeProcessorLayer } from "./processors/codemode/index.js";
+import { CodemodeProcessorLayer, CodeExecutionRuntimeLive } from "./processors/codemode/index.js";
 import { LlmLoopProcessorLayer } from "./processors/llm-loop/index.js";
 import { ServerLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
@@ -42,7 +42,7 @@ const LanguageModelLive = OpenAiLanguageModel.layer({
 // Processors (background processes that run with the server)
 const ProcessorsLive = Layer.mergeAll(
   LlmLoopProcessorLayer,
-  CodemodeProcessorLayer,
+  CodemodeProcessorLayer.pipe(Layer.provide(CodeExecutionRuntimeLive)),
   ClockProcessorLayer,
 );
 

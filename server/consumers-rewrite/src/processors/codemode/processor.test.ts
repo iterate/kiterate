@@ -16,6 +16,7 @@ import {
   ToolRegisteredEvent,
 } from "./events.js";
 import { CodemodeProcessor } from "./processor.js";
+import { liveLayer as CodeExecutionRuntimeLive } from "./runtime.js";
 
 // Helper to decode event payloads with proper typing
 const decodeDone = (event: { payload: unknown }) => {
@@ -101,7 +102,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("completed successfully");
     expect(userMsg.payload.content).toContain("42");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("captures console.log calls", () =>
@@ -133,7 +134,7 @@ it.scoped("captures console.log calls", () =>
     expect(done.logs[0]?.args).toEqual(["hello", "world"]);
     expect(done.logs[1]?.args).toEqual([123]);
     expect(done.logs[0]?.timestamp).toBeDefined();
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("handles evaluation errors", () =>
@@ -165,7 +166,7 @@ it.scoped("handles evaluation errors", () =>
     const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("failed");
     expect(userMsg.payload.content).toContain("intentional error");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("handles missing codemode function", () =>
@@ -190,7 +191,7 @@ it.scoped("handles missing codemode function", () =>
     const failed = decodeFailed(failedEvent);
     expect(failed.success).toBe(false);
     expect(failed.error).toContain('async function named "codemode"');
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("handles multiple codemode blocks", () =>
@@ -236,7 +237,7 @@ it.scoped("handles multiple codemode blocks", () =>
 
     expect(done1.data).toBe("1");
     expect(done2.data).toBe("2");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("handles non-serializable return values", () =>
@@ -265,7 +266,7 @@ it.scoped("handles non-serializable return values", () =>
     const done = decodeDone(doneEvent);
     expect(done.success).toBe(true);
     expect(done.data).toContain("non-serializable");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 // -------------------------------------------------------------------------------------
@@ -300,7 +301,7 @@ it.scoped("appends user message with output after successful execution", () =>
     expect(userMsg.payload.content).toContain('"status":"ok"');
     expect(userMsg.payload.content).toContain('"count":42');
     expect(userMsg.payload.content).toContain("Please let the user know how it went");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("appends user message with error after failed execution", () =>
@@ -330,7 +331,7 @@ it.scoped("appends user message with error after failed execution", () =>
     expect(userMsg.payload.content).toContain("Error:");
     expect(userMsg.payload.content).toContain("database connection failed");
     expect(userMsg.payload.content).toContain("try again if appropriate");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("includes console logs in user message summary", () =>
@@ -364,7 +365,7 @@ it.scoped("includes console logs in user message summary", () =>
     expect(userMsg.payload.content).toContain("Step 1 complete");
     expect(userMsg.payload.content).toContain("items");
     expect(userMsg.payload.content).toContain("Finished!");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("includes console logs in failed execution summary", () =>
@@ -397,7 +398,7 @@ it.scoped("includes console logs in failed execution summary", () =>
     expect(userMsg.payload.content).toContain("Attempting operation...");
     expect(userMsg.payload.content).toContain("Warning: retrying...");
     expect(userMsg.payload.content).toContain("max retries exceeded");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 // -------------------------------------------------------------------------------------
@@ -458,7 +459,7 @@ it.scoped("registers a tool via event and makes it available in codemode", () =>
     const done = decodeDone(doneEvent);
     expect(done.success).toBe(true);
     expect(JSON.parse(done.data)).toEqual({ result: 8 });
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("tool can use fetch and other context globals", () =>
@@ -514,7 +515,7 @@ it.scoped("tool can use fetch and other context globals", () =>
     const result = JSON.parse(done.data);
     expect(result.ok).toBe(true);
     expect(result.status).toBe(200);
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("tool execution errors are reported to the LLM", () =>
@@ -563,7 +564,7 @@ it.scoped("tool execution errors are reported to the LLM", () =>
     const failed = decodeFailed(failedEvent);
     expect(failed.success).toBe(false);
     expect(failed.error).toContain("Tool execution failed!");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("tool with invalid implementation reports error", () =>
@@ -610,7 +611,7 @@ it.scoped("tool with invalid implementation reports error", () =>
     expect(failed.success).toBe(false);
     expect(failed.error).toContain("badTool");
     expect(failed.error).toContain("invalid implementation");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 // -------------------------------------------------------------------------------------
@@ -667,7 +668,7 @@ it.scoped("deferred block completes when it returns truthy", () =>
     const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task completed");
     expect(userMsg.payload.content).toContain("done!");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("deferred block keeps polling when it returns falsy", () =>
@@ -724,7 +725,7 @@ it.scoped("deferred block keeps polling when it returns falsy", () =>
     // Should notify the LLM of the timeout
     const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task timed out");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("deferred block fails when it throws", () =>
@@ -764,7 +765,7 @@ it.scoped("deferred block fails when it throws", () =>
     const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task failed");
     expect(userMsg.payload.content).toContain("Something went wrong!");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("deferred block can use registered tools", () =>
@@ -816,7 +817,7 @@ it.scoped("deferred block can use registered tools", () =>
     // Should complete successfully
     const completedEvent = yield* stream.waitForEvent(DeferredCompletedEvent);
     expect(completedEvent.payload.result).toContain("42");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );
 
 it.scoped("codemode can emit deferred block via emit()", () =>
@@ -862,5 +863,5 @@ it.scoped("codemode can emit deferred block via emit()", () =>
     // Should complete
     const completed = yield* stream.waitForEvent(DeferredCompletedEvent);
     expect(completed.payload.result).toContain("emitted");
-  }),
+  }).pipe(Effect.provide(CodeExecutionRuntimeLive)),
 );

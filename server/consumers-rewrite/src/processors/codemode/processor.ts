@@ -1,4 +1,3 @@
-import { execa } from "execa";
 /**
  * Codemode Processor
  *
@@ -24,6 +23,7 @@ import { Processor, toLayer } from "../processor.js";
 import { withSpanFromEvent } from "../../tracing/helpers.js";
 import { RequestEndedEvent, ResponseSseEvent, SystemPromptEditEvent } from "../llm-loop/events.js";
 import { TimeTickEvent } from "../clock/events.js";
+import { CodeExecutionRuntime, type CodeExecutionRuntimeShape } from "./runtime.js";
 import {
   CodeBlockAddedEvent,
   CodeEvalDoneEvent,
@@ -269,8 +269,8 @@ const extractCodemodeBlocks = (
 type ExecutionContext = {
   console: Console;
   fetch: typeof global.fetch;
-  execa: typeof import("execa").execa;
-  process: { env: typeof process.env };
+  execa: CodeExecutionRuntimeShape["execa"];
+  process: { env: Record<string, string | undefined> };
   require: typeof global.require;
   /** Emit an event to the stream */
   emit: (event: EventInput) => void;
@@ -299,8 +299,8 @@ type Result = SuccessResult | FailureResult;
 type ToolContext = {
   console: Console;
   fetch: typeof global.fetch;
-  execa: typeof import("execa").execa;
-  process: { env: typeof process.env };
+  execa: CodeExecutionRuntimeShape["execa"];
+  process: { env: Record<string, string | undefined> };
   require: typeof global.require;
   /** Emit an event to the stream (for deferred blocks, etc.) */
   emit: (event: { type: string; payload: Record<string, unknown> }) => void;
@@ -369,6 +369,7 @@ const buildToolFactories = (
  *
  * @param code - The code to execute
  * @param toolFactories - Map of tool name to tool function factory
+ * @param runtime - The runtime dependencies (fetch, execa, env)
  */
 const executeCode = async (
   code: string,
@@ -376,6 +377,7 @@ const executeCode = async (
     string,
     (context: ToolContext) => (params: unknown) => Promise<unknown>
   >,
+  runtime: CodeExecutionRuntimeShape,
 ): Promise<Result> => {
   const logs: Array<LogEntry> = [];
   const emittedEvents: Array<EventInput> = [];
@@ -403,10 +405,10 @@ const executeCode = async (
   // Tool context for binding tools
   const toolContext: ToolContext = {
     console: capturedConsole as Console,
-    fetch: global.fetch,
-    execa: execa,
-    process: { env: process.env },
-    require: global.require,
+    fetch: runtime.fetch,
+    execa: runtime.execa,
+    process: { env: runtime.env },
+    require: runtime.require,
     emit,
   };
 
@@ -432,10 +434,10 @@ const executeCode = async (
     // Build the context object with base context + bound tools
     const context: ExecutionContext = {
       console: capturedConsole as Console,
-      fetch: global.fetch,
-      execa: execa,
-      process: { env: process.env },
-      require: global.require,
+      fetch: runtime.fetch,
+      execa: runtime.execa,
+      process: { env: runtime.env },
+      require: runtime.require,
       emit,
     };
 
@@ -644,11 +646,12 @@ const reduce = (state: State, event: Event): State => {
 // Processor
 // -------------------------------------------------------------------------------------
 
-export const CodemodeProcessor: Processor<never> = {
+export const CodemodeProcessor: Processor<CodeExecutionRuntime> = {
   name: "codemode",
 
   run: (stream) =>
     Effect.gen(function* () {
+      const runtime = yield* CodeExecutionRuntime;
       // Phase 1: Hydrate from history
       let state = yield* stream.read().pipe(Stream.runFold(State.initial, reduce));
 
@@ -745,7 +748,9 @@ export const CodemodeProcessor: Processor<never> = {
                 const toolFactories = buildToolFactories(state.registeredTools);
 
                 // Run the evaluation (this is async/Promise-based)
-                const result = yield* Effect.promise(() => executeCode(code, toolFactories));
+                const result = yield* Effect.promise(() =>
+                  executeCode(code, toolFactories, runtime),
+                );
 
                 // Append any events emitted by the code
                 if (result.emittedEvents.length > 0) {
@@ -810,7 +815,7 @@ export const CodemodeProcessor: Processor<never> = {
 
                   // Execute the deferred block code
                   const result = yield* Effect.promise(() =>
-                    executeCode(block.code, toolFactories),
+                    executeCode(block.code, toolFactories, runtime),
                   );
 
                   // Append any events emitted by the code
