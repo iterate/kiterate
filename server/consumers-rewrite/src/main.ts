@@ -5,6 +5,7 @@ import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Config, Layer } from "effect";
 
+import * as Interceptors from "./interceptors/index.js";
 import { ClockProcessorLayer } from "./processors/clock/index.js";
 import { CodemodeProcessorLayer, CodeExecutionRuntimeLive } from "./processors/codemode/index.js";
 import { LlmLoopProcessorLayer } from "./processors/llm-loop/index.js";
@@ -46,11 +47,15 @@ const ProcessorsLive = Layer.mergeAll(
   ClockProcessorLayer,
 );
 
+// Empty interceptor registry (processors can register interceptors during their run)
+const InterceptorRegistryLive = Interceptors.emptyLayer;
+
 // StreamManager with processors on top
 const StreamManagerLive = ProcessorsLive.pipe(
   Layer.provideMerge(StreamManager.liveLayer),
   Layer.provide(StreamStorageLive),
   Layer.provide(LanguageModelLive),
+  Layer.provide(InterceptorRegistryLive),
 );
 
 const MainLive = ServerLive(port).pipe(

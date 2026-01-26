@@ -48,6 +48,18 @@ export const Payload = Schema.Record({ key: Schema.String, value: Schema.Unknown
 export type Payload = typeof Payload.Type;
 
 // -------------------------------------------------------------------------------------
+// Interception record (for event interception tracking)
+// -------------------------------------------------------------------------------------
+
+/** Record of an interception - stored in the event's interceptions array */
+export class Interception extends Schema.Class<Interception>("Interception")({
+  /** Name of the interceptor that intercepted this event */
+  interceptor: Schema.String,
+  /** Original event type before this interception */
+  originalType: EventType,
+}) {}
+
+// -------------------------------------------------------------------------------------
 // EventInput (base) -> Event (extended with offset + createdAt)
 // -------------------------------------------------------------------------------------
 
@@ -56,6 +68,8 @@ export class EventInput extends Schema.Class<EventInput>("EventInput")({
   type: EventType,
   payload: Payload,
   version: Schema.optionalWith(Version, { default: () => Version.make("1") }),
+  /** Track which interceptors have already intercepted this event */
+  interceptions: Schema.optionalWith(Schema.Array(Interception), { default: () => [] }),
 }) {}
 
 /** Full event with path, offset and createdAt assigned by storage */

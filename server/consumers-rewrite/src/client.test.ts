@@ -6,6 +6,7 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Layer, Scope } from "effect";
 
 import { EventInput, EventType, StreamPath } from "./domain.js";
+import * as Interceptors from "./interceptors/index.js";
 import { AppLive } from "./server.js";
 import * as StreamClient from "./services/stream-client/index.js";
 import * as StreamManager from "./services/stream-manager/index.js";
@@ -16,6 +17,7 @@ const testLayer = Layer.merge(
   AppLive.pipe(
     Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
+    Layer.provide(Interceptors.emptyLayer),
     Layer.provide(NodeHttpServer.layerTest),
   ),
   StreamClient.liveLayer({ baseUrl: "" }).pipe(Layer.provide(NodeHttpServer.layerTest)),

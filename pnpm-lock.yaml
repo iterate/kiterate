@@ -123,6 +123,9 @@ importers:
       '@mmkal/json-schema-to-typescript':
         specifier: ^15.0.4
         version: 15.0.4
+      '@mmkal/jsonata':
+        specifier: ^2.2.0
+        version: 2.2.0
       dedent:
         specifier: ^1.7.1
         version: 1.7.1
@@ -1609,6 +1612,10 @@ packages:
     resolution: {integrity: sha512-e5P6qrl5YnZQOtaDAxT5ydmRsmwAzvw7O2u8IYj0VvK6217zhkaDWrphwS5DArwFuQmiNwo+FwcVyAvtX8KNig==}
     engines: {node: '>=16.0.0'}
     hasBin: true
+
+  '@mmkal/jsonata@2.2.0':
+    resolution: {integrity: sha512-FGqtpTuyALAiWUiEY5cPH0+JCgE6Cj5/Wg6LKvFhIVoR6106EbhCO+KaAJ9f0bYVop1mSIQ8+ZiylcRrYe/6kg==}
+    engines: {node: '>= 8'}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     resolution: {integrity: sha512-QZHtlVgbAdy2zAqNA9Gu1UpIuI8Xvsd1v8ic6B2pZmeFnFcMWiPLfWXh7TVw4eGEZ/C9TH281KwhVoeQUKbyjw==}
@@ -6923,6 +6930,8 @@ snapshots:
       minimist: 1.2.8
       prettier: 3.8.0
       tinyglobby: 0.2.15
+
+  '@mmkal/jsonata@2.2.0': {}
 
   '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.3':
     optional: true

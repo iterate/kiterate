@@ -5,11 +5,15 @@ import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 
 import { EventInput, EventType, Offset, StreamPath } from "../../domain.js";
+import * as Interceptors from "../../interceptors/index.js";
 import * as StreamStorage from "../stream-storage/index.js";
 import * as StreamManager from "./index.js";
 import { liveLayer } from "./live.js";
 
-const testLayer = liveLayer.pipe(Layer.provide(StreamStorage.inMemoryLayer));
+const testLayer = liveLayer.pipe(
+  Layer.provide(StreamStorage.inMemoryLayer),
+  Layer.provide(Interceptors.emptyLayer),
+);
 
 describe("StreamManager", () => {
   it.effect("read returns historical events", () =>

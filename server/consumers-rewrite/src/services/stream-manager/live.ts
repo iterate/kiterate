@@ -4,6 +4,7 @@
 import { Effect, Layer, PubSub, Stream } from "effect";
 
 import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
+import { InterceptorRegistry } from "../../interceptors/service.js";
 import { StreamStorageManager } from "../stream-storage/service.js";
 import * as EventStream from "./eventStream.js";
 import { StreamManager } from "./service.js";
@@ -12,10 +13,15 @@ import { StreamManager } from "./service.js";
 // StreamManager layer
 // -------------------------------------------------------------------------------------
 
-export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> = Layer.effect(
+export const liveLayer: Layer.Layer<
+  StreamManager,
+  never,
+  StreamStorageManager | InterceptorRegistry
+> = Layer.effect(
   StreamManager,
   Effect.gen(function* () {
     const storageManager = yield* StreamStorageManager;
+    const interceptorRegistry = yield* InterceptorRegistry;
     const streams = new Map<StreamPath, EventStream.EventStream>();
 
     // Global PubSub for all events (used for "all paths" subscriptions)
@@ -28,7 +34,9 @@ export const liveLayer: Layer.Layer<StreamManager, never, StreamStorageManager> 
       if (existing) return existing;
 
       const storage = storageManager.forPath(path);
-      const stream = yield* EventStream.make(storage, path);
+      // Pass interceptors to EventStream - they're evaluated at append time,
+      // so interceptors registered after stream creation still apply
+      const stream = yield* EventStream.make(storage, path, interceptorRegistry.list());
       streams.set(path, stream);
       return stream;
     });

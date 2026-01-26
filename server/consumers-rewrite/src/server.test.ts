@@ -3,6 +3,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { Chunk, Effect, Layer, Stream } from "effect";
 
+import * as Interceptors from "./interceptors/index.js";
 import { AppLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
@@ -11,6 +12,7 @@ const testLayer = Layer.merge(
   AppLive.pipe(
     Layer.provide(StreamManager.liveLayer),
     Layer.provide(StreamStorage.inMemoryLayer),
+    Layer.provide(Interceptors.emptyLayer),
     Layer.provide(NodeHttpServer.layerTest),
   ),
   NodeHttpServer.layerTest,

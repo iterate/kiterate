@@ -6,9 +6,11 @@
  */
 import { DateTime, Effect, PubSub, Schema, Stream } from "effect";
 
-import { Event, EventInput, Offset, StreamPath } from "../../domain.js";
+import { Event, EventInput, EventType, Interception, Offset, StreamPath } from "../../domain.js";
 import { StreamStorage } from "../stream-storage/service.js";
 import { fromCurrentSpan } from "../../tracing/helpers.js";
+import { INTERCEPTED_PREFIX, type Interceptor } from "../../interceptors/interceptor.js";
+import * as Matcher from "../../interceptors/matcher.js";
 
 // -------------------------------------------------------------------------------------
 // State (derived from event history)
@@ -55,8 +57,16 @@ export interface EventStream {
  *
  * The `subscribe` method here is the inverse - it's "respond to a subscriber",
  * not "subscribe to something". Like Cloudflare Workers' `fetch` handler.
+ *
+ * @param storage - The storage backend for this path
+ * @param path - The stream path
+ * @param interceptors - List of registered interceptors (evaluated in order, first match wins)
  */
-export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<EventStream> =>
+export const make = (
+  storage: StreamStorage,
+  path: StreamPath,
+  interceptors: ReadonlyArray<Interceptor>,
+): Effect.Effect<EventStream> =>
   Effect.gen(function* () {
     // Boot: hydrate offset from history
     let state = yield* storage.read().pipe(Stream.runFold(State.initial, reduce));
@@ -65,10 +75,37 @@ export const make = (storage: StreamStorage, path: StreamPath): Effect.Effect<Ev
 
     const append = (eventInput: EventInput) =>
       Effect.gen(function* () {
+        // Apply interception: find first matching interceptor that hasn't already intercepted
+        let finalInput = eventInput;
+
+        for (const interceptor of interceptors) {
+          // Skip if this interceptor already processed this event
+          const alreadyIntercepted = finalInput.interceptions.some(
+            (i) => i.interceptor === interceptor.name,
+          );
+          if (alreadyIntercepted) continue;
+
+          if (Matcher.matches(interceptor, finalInput)) {
+            // First match wins - prefix type and record interception
+            finalInput = new EventInput({
+              ...finalInput,
+              type: EventType.make(`${INTERCEPTED_PREFIX}${finalInput.type}`),
+              interceptions: [
+                ...finalInput.interceptions,
+                new Interception({
+                  interceptor: interceptor.name,
+                  originalType: finalInput.type,
+                }),
+              ],
+            });
+            break; // Only first interceptor intercepts
+          }
+        }
+
         const nextOffset = formatOffset(offsetToNumber(state.lastOffset) + 1);
         const createdAt = yield* DateTime.now;
         const trace = yield* fromCurrentSpan;
-        const event = Event.make({ ...eventInput, path, offset: nextOffset, createdAt, trace });
+        const event = Event.make({ ...finalInput, path, offset: nextOffset, createdAt, trace });
 
         yield* storage.append(event);
         state = reduce(state, event);

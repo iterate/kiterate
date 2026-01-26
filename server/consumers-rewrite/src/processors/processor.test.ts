@@ -8,12 +8,16 @@ import { describe, it, expect } from "@effect/vitest";
 import { Deferred, Effect, Layer, Ref } from "effect";
 
 import { EventInput, EventType, StreamPath } from "../domain.js";
+import * as Interceptors from "../interceptors/index.js";
 import * as StreamManager from "../services/stream-manager/index.js";
 import * as StreamStorage from "../services/stream-storage/index.js";
 import { toLayer, type Processor } from "./processor.js";
 
 const TEST_TIMEOUT = "500 millis";
-const streamManagerLayer = StreamManager.liveLayer.pipe(Layer.provide(StreamStorage.inMemoryLayer));
+const streamManagerLayer = StreamManager.liveLayer.pipe(
+  Layer.provide(StreamStorage.inMemoryLayer),
+  Layer.provide(Interceptors.emptyLayer),
+);
 const testEventType = EventType.make("test");
 
 const makeTestLayer = (processor: Processor<never>) =>
