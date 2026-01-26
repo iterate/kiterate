@@ -1,14 +1,19 @@
+import { LanguageModel } from "@effect/ai";
 import { OpenAiClient, OpenAiLanguageModel } from "@effect/ai-openai";
 import * as Otlp from "@effect/opentelemetry/Otlp";
 import * as OtlpSerialization from "@effect/opentelemetry/OtlpSerialization";
 import { FetchHttpClient } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Config, Layer } from "effect";
+import { Config, Context, Layer } from "effect";
 
 import * as Interceptors from "./interceptors/index.js";
 import { ClockProcessorLayer } from "./processors/clock/index.js";
 import { CodemodeProcessorLayer, CodeExecutionRuntimeLive } from "./processors/codemode/index.js";
 import { LlmLoopProcessorLayer } from "./processors/llm-loop/index.js";
+import {
+  DetectionModel,
+  PromptInjectionProcessorLayer,
+} from "./processors/prompt-injection/index.js";
 import { ServerLive } from "./server.js";
 import * as StreamManager from "./services/stream-manager/index.js";
 import * as StreamStorage from "./services/stream-storage/index.js";
@@ -40,11 +45,22 @@ const LanguageModelLive = OpenAiLanguageModel.layer({
   },
 }).pipe(Layer.provide(OpenAiClientLive));
 
+// Detection model - a faster/cheaper model for prompt injection detection
+// Using gpt-4o-mini for quick classification
+const DetectionModelLive = OpenAiLanguageModel.layer({ model: "gpt-4o-mini" }).pipe(
+  // Map the LanguageModel.LanguageModel output to DetectionModel
+  Layer.map((ctx) =>
+    ctx.pipe(Context.add(DetectionModel, Context.get(ctx, LanguageModel.LanguageModel))),
+  ),
+  Layer.provide(OpenAiClientLive),
+);
+
 // Processors (background processes that run with the server)
 const ProcessorsLive = Layer.mergeAll(
   LlmLoopProcessorLayer,
   CodemodeProcessorLayer.pipe(Layer.provide(CodeExecutionRuntimeLive)),
   ClockProcessorLayer,
+  PromptInjectionProcessorLayer.pipe(Layer.provide(DetectionModelLive)),
 );
 
 // Empty interceptor registry (processors can register interceptors during their run)
