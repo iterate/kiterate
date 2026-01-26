@@ -19,7 +19,7 @@ import dedent from "dedent";
 import { Effect, HashSet, Option, Schema, Stream } from "effect";
 
 import { Event, EventInput, Offset } from "../../domain.js";
-import { UserMessageEvent } from "../../events.js";
+import { DeveloperMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { withSpanFromEvent } from "../../tracing/helpers.js";
 import { RequestEndedEvent, ResponseSseEvent, SystemPromptEditEvent } from "../llm-loop/events.js";
@@ -766,26 +766,18 @@ export const CodemodeProcessor: Processor<never> = {
                   yield* stream.append(CodeEvalDoneEvent.make({ requestId, ...result }));
                   yield* Effect.log(`code block ${requestId} completed successfully`);
 
-                  // Append a synthetic user message to inform the LLM of the result
+                  // Append a developer message to inform the LLM of the result
                   const summary = createResultSummary(result);
                   yield* Effect.log(`appending codemode result (${summary.length} chars)`);
-                  yield* stream.append(
-                    UserMessageEvent.make({
-                      content: dedent`
-                        <developer-message>
-                          ${summary}
-                        </developer-message>
-                      `,
-                    }),
-                  );
+                  yield* stream.append(DeveloperMessageEvent.make({ content: summary }));
                 } else {
                   yield* stream.append(CodeEvalFailedEvent.make({ requestId, ...result }));
                   yield* Effect.log(`code block ${requestId} failed: ${result.error}`);
 
-                  // Append a synthetic user message to inform the LLM of the failure
+                  // Append a developer message to inform the LLM of the failure
                   const summary = createResultSummary(result);
                   yield* Effect.log(`appending codemode error result (${summary.length} chars)`);
-                  yield* stream.append(UserMessageEvent.make({ content: summary }));
+                  yield* stream.append(DeveloperMessageEvent.make({ content: summary }));
                 }
               }).pipe(withSpanFromEvent("codemode.eval", event));
             }
@@ -853,17 +845,15 @@ export const CodemodeProcessor: Processor<never> = {
                     );
                     // Notify LLM of failure
                     yield* stream.append(
-                      UserMessageEvent.make({
+                      DeveloperMessageEvent.make({
                         content: dedent`
-                          <developer-message>
-                            [Deferred task failed]
+                          [Deferred task failed]
 
-                            Task: ${block.description}
-                            Error: ${result.error}
+                          Task: ${block.description}
+                          Error: ${result.error}
 
-                            Console logs:
-                            ${formatLogs([...result.logs])}
-                          </developer-message>
+                          Console logs:
+                          ${formatLogs([...result.logs])}
                         `,
                       }),
                     );
@@ -895,17 +885,15 @@ export const CodemodeProcessor: Processor<never> = {
                     );
                     // Notify LLM of completion
                     yield* stream.append(
-                      UserMessageEvent.make({
+                      DeveloperMessageEvent.make({
                         content: dedent`
-                          <developer-message>
-                            [Deferred task completed]
+                          [Deferred task completed]
 
-                            Task: ${block.description}
-                            Result: ${result.data}
+                          Task: ${block.description}
+                          Result: ${result.data}
 
-                            Console logs:
-                            ${formatLogs([...result.logs])}
-                          </developer-message>
+                          Console logs:
+                          ${formatLogs([...result.logs])}
                         `,
                       }),
                     );
@@ -922,16 +910,14 @@ export const CodemodeProcessor: Processor<never> = {
                     );
                     // Notify LLM of timeout
                     yield* stream.append(
-                      UserMessageEvent.make({
+                      DeveloperMessageEvent.make({
                         content: dedent`
-                          <developer-message>
-                            [Deferred task timed out]
+                          [Deferred task timed out]
 
-                            Task: ${block.description}
-                            Attempts: ${attemptNumber}
+                          Task: ${block.description}
+                          Attempts: ${attemptNumber}
 
-                            The task did not complete within the maximum number of polling attempts.
-                          </developer-message>
+                          The task did not complete within the maximum number of polling attempts.
                         `,
                       }),
                     );
@@ -948,16 +934,14 @@ export const CodemodeProcessor: Processor<never> = {
                         ? `${elapsedMinutes}m ${elapsedSecondsRemainder}s`
                         : `${elapsedSeconds}s`;
                     yield* stream.append(
-                      UserMessageEvent.make({
+                      DeveloperMessageEvent.make({
                         content: dedent`
-                          <developer-message>
-                            [Background task still in progress]
+                          [Background task still in progress]
 
-                            Task: ${block.description}
-                            Status: Polling attempt ${attemptNumber}/${block.maxAttempts} (~${elapsedStr} elapsed)
+                          Task: ${block.description}
+                          Status: Polling attempt ${attemptNumber}/${block.maxAttempts} (~${elapsedStr} elapsed)
 
-                            This is an automatic status update. The system is already polling for completion - do NOT use codemode or call any tools in response to this message. Simply acknowledge the wait to the user if you haven't recently, or say nothing if you already have.
-                          </developer-message>
+                          This is an automatic status update. The system is already polling for completion - do NOT use codemode or call any tools in response to this message. Simply acknowledge the wait to the user if you haven't recently, or say nothing if you already have.
                         `,
                       }),
                     );

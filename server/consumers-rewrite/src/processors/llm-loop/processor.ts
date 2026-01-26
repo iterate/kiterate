@@ -12,7 +12,7 @@ import { Cause, Duration, Effect, Exit, Option, Schema, Stream } from "effect";
 
 import dedent from "dedent";
 import { Event, Offset } from "../../domain.js";
-import { ConfigSetEvent, UserMessageEvent } from "../../events.js";
+import { ConfigSetEvent, DeveloperMessageEvent, UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { makeDebounced } from "../../utils/debounce.js";
 import { withTraceFromEvent } from "../../tracing/helpers.js";
@@ -121,6 +121,16 @@ const reduce = (state: State, event: Event): State => {
   if (UserMessageEvent.is(event)) {
     return state.with({
       history: [...state.history, { role: "user", content: event.payload.content }],
+      llmRequestRequiredFrom: Option.some(event.offset),
+    });
+  }
+
+  // Developer message - add to history wrapped in XML tags, and mark offset as pending
+  // This is for system/internal messages (codemode results, status updates, etc.)
+  if (DeveloperMessageEvent.is(event)) {
+    const wrappedContent = `<developer-message>\n${event.payload.content}\n</developer-message>`;
+    return state.with({
+      history: [...state.history, { role: "user", content: wrappedContent }],
       llmRequestRequiredFrom: Option.some(event.offset),
     });
   }

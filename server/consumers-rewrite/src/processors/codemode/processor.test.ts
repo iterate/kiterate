@@ -4,7 +4,7 @@ import dedent from "dedent";
 import { Effect, Option } from "effect";
 
 import { Offset, StreamPath } from "../../domain.js";
-import { UserMessageEvent } from "../../events.js";
+import { DeveloperMessageEvent } from "../../events.js";
 import { makeTestEventStream, type TestEventStream } from "../../testing/index.js";
 import { RequestEndedEvent, RequestStartedEvent, ResponseSseEvent } from "../llm-loop/events.js";
 import { SystemPromptEditEvent } from "../llm-loop/events.js";
@@ -98,7 +98,7 @@ it.scoped("parses codemode block and evaluates successfully", () =>
     expect(done.data).toBe("42");
 
     // Should append a user message summarizing the result
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("completed successfully");
     expect(userMsg.payload.content).toContain("42");
   }),
@@ -162,7 +162,7 @@ it.scoped("handles evaluation errors", () =>
     expect(failed.error).toContain("intentional error");
 
     // Should append a user message about the failure
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("failed");
     expect(userMsg.payload.content).toContain("intentional error");
   }),
@@ -294,7 +294,7 @@ it.scoped("appends user message with output after successful execution", () =>
 
     yield* stream.waitForEvent(CodeEvalDoneEvent);
 
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("[Codemode execution completed successfully]");
     expect(userMsg.payload.content).toContain("Output:");
     expect(userMsg.payload.content).toContain('"status":"ok"');
@@ -325,7 +325,7 @@ it.scoped("appends user message with error after failed execution", () =>
 
     yield* stream.waitForEvent(CodeEvalFailedEvent);
 
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("[Codemode execution failed]");
     expect(userMsg.payload.content).toContain("Error:");
     expect(userMsg.payload.content).toContain("database connection failed");
@@ -358,7 +358,7 @@ it.scoped("includes console logs in user message summary", () =>
 
     yield* stream.waitForEvent(CodeEvalDoneEvent);
 
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Console logs:");
     expect(userMsg.payload.content).toContain("Starting process...");
     expect(userMsg.payload.content).toContain("Step 1 complete");
@@ -391,7 +391,7 @@ it.scoped("includes console logs in failed execution summary", () =>
 
     yield* stream.waitForEvent(CodeEvalFailedEvent);
 
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("[Codemode execution failed]");
     expect(userMsg.payload.content).toContain("Console logs:");
     expect(userMsg.payload.content).toContain("Attempting operation...");
@@ -664,7 +664,7 @@ it.scoped("deferred block completes when it returns truthy", () =>
     expect(completedEvent.payload.result).toContain("done!");
 
     // Should notify the LLM
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task completed");
     expect(userMsg.payload.content).toContain("done!");
   }),
@@ -700,7 +700,7 @@ it.scoped("deferred block keeps polling when it returns falsy", () =>
     expect(poll1.payload.attemptNumber).toBe(1);
     expect(poll1.payload.result).toBeNull(); // Still pending
     // Consume the "still in progress" message
-    const pendingMsg1 = yield* stream.waitForEvent(UserMessageEvent);
+    const pendingMsg1 = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(pendingMsg1.payload.content).toContain("still in progress");
 
     // Second tick at 20s
@@ -709,7 +709,7 @@ it.scoped("deferred block keeps polling when it returns falsy", () =>
     expect(poll2.payload.attemptNumber).toBe(2);
     expect(poll2.payload.result).toBeNull();
     // Consume the "still in progress" message
-    const pendingMsg2 = yield* stream.waitForEvent(UserMessageEvent);
+    const pendingMsg2 = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(pendingMsg2.payload.content).toContain("still in progress");
 
     // Third tick at 30s - should time out
@@ -722,7 +722,7 @@ it.scoped("deferred block keeps polling when it returns falsy", () =>
     expect(timeoutEvent.payload.attempts).toBe(3);
 
     // Should notify the LLM of the timeout
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task timed out");
   }),
 );
@@ -761,7 +761,7 @@ it.scoped("deferred block fails when it throws", () =>
     expect(failedEvent.payload.error).toContain("Something went wrong!");
 
     // Should notify the LLM
-    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    const userMsg = yield* stream.waitForEvent(DeveloperMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task failed");
     expect(userMsg.payload.content).toContain("Something went wrong!");
   }),

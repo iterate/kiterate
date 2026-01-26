@@ -90,6 +90,17 @@ export const UserMessageEvent = EventSchema.make("iterate:agent:action:send-user
 });
 export type UserMessageEvent = typeof UserMessageEvent.Type;
 
+/**
+ * A message from the system/developer to the LLM (not from the user).
+ * Used for status updates, codemode results, and other internal notifications.
+ * When building messages for the LLM, these are wrapped in <developer-message> XML tags
+ * (or could use model-specific "developer" role in the future).
+ */
+export const DeveloperMessageEvent = EventSchema.make("iterate:developer-message", {
+  content: Schema.String,
+});
+export type DeveloperMessageEvent = typeof DeveloperMessageEvent.Type;
+
 export const UserAudioEvent = EventSchema.make("iterate:agent:action:send-user-audio:called", {
   audio: Schema.String,
 });
