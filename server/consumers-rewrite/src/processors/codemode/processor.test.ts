@@ -699,12 +699,18 @@ it.scoped("deferred block keeps polling when it returns falsy", () =>
     const poll1 = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
     expect(poll1.payload.attemptNumber).toBe(1);
     expect(poll1.payload.result).toBeNull(); // Still pending
+    // Consume the "still in progress" message
+    const pendingMsg1 = yield* stream.waitForEvent(UserMessageEvent);
+    expect(pendingMsg1.payload.content).toContain("still in progress");
 
     // Second tick at 20s
     yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 20 }));
     const poll2 = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
     expect(poll2.payload.attemptNumber).toBe(2);
     expect(poll2.payload.result).toBeNull();
+    // Consume the "still in progress" message
+    const pendingMsg2 = yield* stream.waitForEvent(UserMessageEvent);
+    expect(pendingMsg2.payload.content).toContain("still in progress");
 
     // Third tick at 30s - should time out
     yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 30 }));
@@ -715,7 +721,7 @@ it.scoped("deferred block keeps polling when it returns falsy", () =>
     const timeoutEvent = yield* stream.waitForEvent(DeferredTimedOutEvent);
     expect(timeoutEvent.payload.attempts).toBe(3);
 
-    // Should notify the LLM
+    // Should notify the LLM of the timeout
     const userMsg = yield* stream.waitForEvent(UserMessageEvent);
     expect(userMsg.payload.content).toContain("Deferred task timed out");
   }),

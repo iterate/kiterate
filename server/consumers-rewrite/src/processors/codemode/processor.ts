@@ -23,6 +23,7 @@ import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { withSpanFromEvent } from "../../tracing/helpers.js";
 import { RequestEndedEvent, ResponseSseEvent, SystemPromptEditEvent } from "../llm-loop/events.js";
+import { TimeTickEvent } from "../clock/events.js";
 import {
   CodeBlockAddedEvent,
   CodeEvalDoneEvent,
@@ -39,7 +40,6 @@ import {
   ToolRegisteredEvent,
   ToolUnregisteredEvent,
 } from "./events.js";
-import { TimeTickEvent } from "../clock/events.js";
 import { RegisteredTool, fromEventPayload } from "./tools/types.js";
 import { generateToolSignature } from "./tools/typescript-gen.js";
 
@@ -939,6 +939,27 @@ export const CodemodeProcessor: Processor<never> = {
                     // Still pending - keep polling
                     yield* Effect.log(
                       `deferred block ${block.blockOffset} still pending (attempt ${attemptNumber}/${block.maxAttempts})`,
+                    );
+                    // Notify LLM of pending status so it can decide whether to acknowledge
+                    const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+                    const elapsedSecondsRemainder = elapsedSeconds % 60;
+                    const elapsedStr =
+                      elapsedMinutes > 0
+                        ? `${elapsedMinutes}m ${elapsedSecondsRemainder}s`
+                        : `${elapsedSeconds}s`;
+                    yield* stream.append(
+                      UserMessageEvent.make({
+                        content: dedent`
+                          <developer-message>
+                            [Background task still in progress]
+
+                            Task: ${block.description}
+                            Status: Polling attempt ${attemptNumber}/${block.maxAttempts} (~${elapsedStr} elapsed)
+
+                            This is an automatic status update. The system is already polling for completion - do NOT use codemode or call any tools in response to this message. Simply acknowledge the wait to the user if you haven't recently, or say nothing if you already have.
+                          </developer-message>
+                        `,
+                      }),
                     );
                   }
                 }).pipe(withSpanFromEvent(`codemode.deferred-poll.${block.blockOffset}`, event));
