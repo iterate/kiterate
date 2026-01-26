@@ -159,6 +159,7 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
   const [inputMode, setInputMode] = useState<InputMode>("message");
   const [aiModel, setAiModel] = useState<AiModelType | null>(null);
   const [searchToolRegistered, setSearchToolRegistered] = useState(false);
+  const [deepResearchToolRegistered, setDeepResearchToolRegistered] = useState(false);
   const { displayMode, setRawEventsCount } = useRawMode();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -315,6 +316,209 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
       }
     } catch (error) {
       setSendError(error instanceof Error ? error.message : "Failed to register tool");
+    }
+  };
+
+  // Handle registering the Parallel AI deep research tools (start, check, and sleep)
+  const handleRegisterDeepResearchTool = async () => {
+    setSendError(null);
+    try {
+      // Tool 1: Start deep research (returns immediately with run ID)
+      const startResearchEvent = {
+        type: "iterate:codemode:tool-registered",
+        payload: {
+          name: "startDeepResearch",
+          description:
+            "Start a comprehensive deep research task on any topic using Parallel AI. This initiates multi-step web exploration and returns immediately with a run ID. Use checkResearchStatus to poll for results. Use this for complex research questions that require synthesizing information from multiple sources.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description:
+                  "The research question or topic to investigate. Be specific and detailed for better results.",
+              },
+              processor: {
+                type: "string",
+                enum: ["pro-fast", "pro", "ultra-fast", "ultra"],
+                description:
+                  "The processor to use. 'pro-fast' (default) and 'ultra-fast' are faster (1-3 min). 'pro' and 'ultra' are more thorough but slower (5-15 min).",
+              },
+            },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          returnDescription: "Object with runId to use with checkResearchStatus",
+          implementation: dedent`
+            const processor = params.processor || "pro-fast";
+            
+            const response = await fetch("https://api.parallel.ai/v1/tasks/runs", {
+              method: "POST",
+              headers: {
+                "Authorization": "Bearer " + process.env.PARALLEL_AI_API_KEY,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                input: params.query,
+                processor: processor,
+                task_spec: { output_schema: { type: "text" } }
+              }),
+            });
+            
+            if (!response.ok) {
+              throw new Error("Failed to create research task: " + response.status + " " + (await response.text()));
+            }
+            
+            const task = await response.json();
+            return {
+              runId: task.run_id,
+              status: "running",
+              processor: processor,
+              message: "Research started. Use checkResearchStatus with this runId to check progress. Consider using sleep for 30-60 seconds before checking.",
+            };
+          `,
+        },
+      };
+
+      // Tool 2: Check research status (quick status check only)
+      const checkResearchEvent = {
+        type: "iterate:codemode:tool-registered",
+        payload: {
+          name: "checkResearchStatus",
+          description:
+            "Check the status of a deep research task. Returns 'running', 'completed', or 'failed'. When completed, use getResearchResult to fetch the full report.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              runId: {
+                type: "string",
+                description: "The run ID returned by startDeepResearch",
+              },
+            },
+            required: ["runId"],
+            additionalProperties: false,
+          },
+          returnDescription: "Status object with 'status' field ('running', 'completed', 'failed')",
+          implementation: dedent`
+            const response = await fetch("https://api.parallel.ai/v1/tasks/runs/" + params.runId, {
+              headers: { "Authorization": "Bearer " + process.env.PARALLEL_AI_API_KEY },
+            });
+            
+            if (!response.ok) {
+              throw new Error("Failed to check task status: " + response.status + " " + (await response.text()));
+            }
+            
+            const result = await response.json();
+            console.log("Research status:", result.status);
+            
+            if (result.status === "completed") {
+              return {
+                status: "completed",
+                runId: params.runId,
+                message: "Research complete! Use getResearchResult to fetch the full report.",
+              };
+            } else if (result.status === "failed") {
+              return {
+                status: "failed",
+                error: result.error || "Unknown error",
+                runId: params.runId,
+              };
+            } else {
+              return {
+                status: "running",
+                runId: params.runId,
+                message: "Research is still in progress. Try again in 30-60 seconds.",
+              };
+            }
+          `,
+        },
+      };
+
+      // Tool 3: Get research result (fetches the full report)
+      const getResearchResultEvent = {
+        type: "iterate:codemode:tool-registered",
+        payload: {
+          name: "getResearchResult",
+          description:
+            "Fetch the full research report for a completed deep research task. Only call this after checkResearchStatus returns 'completed'.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              runId: {
+                type: "string",
+                description: "The run ID returned by startDeepResearch",
+              },
+            },
+            required: ["runId"],
+            additionalProperties: false,
+          },
+          returnDescription: "The full research report as markdown with citations",
+          implementation: dedent`
+            const response = await fetch("https://api.parallel.ai/v1/tasks/runs/" + params.runId + "/result", {
+              headers: { "Authorization": "Bearer " + process.env.PARALLEL_AI_API_KEY },
+            });
+            
+            if (!response.ok) {
+              throw new Error("Failed to get research result: " + response.status + " " + (await response.text()));
+            }
+            
+            const data = await response.json();
+            return {
+              runId: params.runId,
+              report: data.output,
+            };
+          `,
+        },
+      };
+
+      // Tool 3: Sleep (for pacing async operations)
+      const sleepEvent = {
+        type: "iterate:codemode:tool-registered",
+        payload: {
+          name: "sleep",
+          description:
+            "Wait for a specified duration. Useful for pacing async operations like waiting for research to complete. Use this between checkResearchStatus calls.",
+          parametersJsonSchema: {
+            type: "object",
+            properties: {
+              seconds: {
+                type: "number",
+                description: "Number of seconds to wait (max 120)",
+              },
+              reason: {
+                type: "string",
+                description: "Why you are waiting (for logging purposes)",
+              },
+            },
+            required: ["seconds"],
+            additionalProperties: false,
+          },
+          returnDescription: "Confirmation that the sleep completed",
+          implementation: dedent`
+            const seconds = Math.min(params.seconds, 120); // Cap at 2 minutes
+            console.log("Sleeping for " + seconds + " seconds" + (params.reason ? ": " + params.reason : ""));
+            await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+            return { slept: seconds, reason: params.reason || "unspecified" };
+          `,
+        },
+      };
+
+      // Register all four tools
+      const results = await Promise.all([
+        sendRawJson(apiURL, agentPath, JSON.stringify(startResearchEvent)),
+        sendRawJson(apiURL, agentPath, JSON.stringify(checkResearchEvent)),
+        sendRawJson(apiURL, agentPath, JSON.stringify(getResearchResultEvent)),
+        sendRawJson(apiURL, agentPath, JSON.stringify(sleepEvent)),
+      ]);
+
+      const allOk = results.every((r) => r.ok);
+      if (!allOk) {
+        setSendError("Failed to register one or more research tools");
+      } else {
+        setDeepResearchToolRegistered(true);
+      }
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : "Failed to register tools");
     }
   };
 
@@ -484,6 +688,17 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             >
               <SearchIcon className="size-3" />
               {searchToolRegistered ? "Search Added" : "Add Search"}
+            </Button>
+            <Button
+              variant={deepResearchToolRegistered ? "secondary" : "outline"}
+              size="sm"
+              className="h-8 text-xs gap-1"
+              disabled={deepResearchToolRegistered}
+              onClick={handleRegisterDeepResearchTool}
+              title="Add Parallel AI deep research tool"
+            >
+              <SearchIcon className="size-3" />
+              {deepResearchToolRegistered ? "Research Added" : "Add Research"}
             </Button>
           </div>
           <div className="flex items-center gap-2">

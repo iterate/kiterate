@@ -97,3 +97,97 @@ export const ToolUnregisteredEvent = EventSchema.make("iterate:codemode:tool-unr
   /** Name of the tool to unregister */
   name: Schema.String,
 });
+
+// -------------------------------------------------------------------------------------
+// Deferred Block Events
+// -------------------------------------------------------------------------------------
+
+/**
+ * Emitted when a deferred block is registered for periodic polling.
+ *
+ * Deferred blocks are generic codemode blocks that run periodically until they
+ * return a truthy value or throw. This is useful for long-running tasks like
+ * deep research that need to poll for completion.
+ *
+ * Convention:
+ * - Return null/falsy = keep polling
+ * - Return truthy = done (result emitted as synthetic user message)
+ * - Throw = done with error
+ *
+ * The block's identity is the offset of this event (not a separate ID field).
+ */
+export const DeferredBlockAddedEvent = EventSchema.make("iterate:codemode:deferred-block-added", {
+  /** JavaScript code to run periodically (same rules as codemode blocks) */
+  code: Schema.String,
+  /** How often to check, in seconds */
+  checkIntervalSeconds: Schema.Number,
+  /** Maximum number of poll attempts before timing out */
+  maxAttempts: Schema.Number,
+  /** Human-readable description for LLM/user visibility */
+  description: Schema.String,
+});
+export type DeferredBlockAddedEvent = typeof DeferredBlockAddedEvent.Type;
+
+/**
+ * Emitted each time a deferred block is polled.
+ */
+export const DeferredPollAttemptedEvent = EventSchema.make(
+  "iterate:codemode:deferred-poll-attempted",
+  {
+    /** Offset of the DeferredBlockAddedEvent */
+    blockOffset: Schema.String,
+    /** 1-indexed attempt number */
+    attemptNumber: Schema.Number,
+    /** Seconds elapsed since stream start when this poll occurred */
+    elapsedSeconds: Schema.Number,
+    /** The result of the poll (null if still pending, stringified value if done) */
+    result: Schema.NullOr(Schema.String),
+    /** Console logs captured during this poll */
+    logs: Schema.Array(LogEntry),
+  },
+);
+export type DeferredPollAttemptedEvent = typeof DeferredPollAttemptedEvent.Type;
+
+/**
+ * Emitted when a deferred block completes successfully (returned truthy).
+ */
+export const DeferredCompletedEvent = EventSchema.make("iterate:codemode:deferred-completed", {
+  /** Offset of the DeferredBlockAddedEvent */
+  blockOffset: Schema.String,
+  /** The final result (stringified) */
+  result: Schema.String,
+});
+export type DeferredCompletedEvent = typeof DeferredCompletedEvent.Type;
+
+/**
+ * Emitted when a deferred block fails (threw an error).
+ */
+export const DeferredFailedEvent = EventSchema.make("iterate:codemode:deferred-failed", {
+  /** Offset of the DeferredBlockAddedEvent */
+  blockOffset: Schema.String,
+  /** The error message */
+  error: Schema.String,
+});
+export type DeferredFailedEvent = typeof DeferredFailedEvent.Type;
+
+/**
+ * Emitted when a deferred block times out (exceeded maxAttempts).
+ */
+export const DeferredTimedOutEvent = EventSchema.make("iterate:codemode:deferred-timed-out", {
+  /** Offset of the DeferredBlockAddedEvent */
+  blockOffset: Schema.String,
+  /** Total number of attempts made */
+  attempts: Schema.Number,
+});
+export type DeferredTimedOutEvent = typeof DeferredTimedOutEvent.Type;
+
+/**
+ * Emitted when a deferred block is cancelled (e.g., by user request).
+ */
+export const DeferredCancelledEvent = EventSchema.make("iterate:codemode:deferred-cancelled", {
+  /** Offset of the DeferredBlockAddedEvent */
+  blockOffset: Schema.String,
+  /** Optional reason for cancellation */
+  reason: Schema.OptionFromNullOr(Schema.String),
+});
+export type DeferredCancelledEvent = typeof DeferredCancelledEvent.Type;

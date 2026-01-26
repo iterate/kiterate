@@ -18,7 +18,7 @@ import { execa } from "execa";
 import dedent from "dedent";
 import { Effect, HashSet, Option, Schema, Stream } from "effect";
 
-import { Event, Offset } from "../../domain.js";
+import { Event, EventInput, Offset } from "../../domain.js";
 import { UserMessageEvent } from "../../events.js";
 import { Processor, toLayer } from "../processor.js";
 import { withSpanFromEvent } from "../../tracing/helpers.js";
@@ -28,11 +28,18 @@ import {
   CodeEvalDoneEvent,
   CodeEvalFailedEvent,
   CodeEvalStartedEvent,
+  DeferredBlockAddedEvent,
+  DeferredCancelledEvent,
+  DeferredCompletedEvent,
+  DeferredFailedEvent,
+  DeferredPollAttemptedEvent,
+  DeferredTimedOutEvent,
   LogEntry,
   RequestId,
   ToolRegisteredEvent,
   ToolUnregisteredEvent,
 } from "./events.js";
+import { TimeTickEvent } from "../clock/events.js";
 import { RegisteredTool, fromEventPayload } from "./tools/types.js";
 import { generateToolSignature } from "./tools/typescript-gen.js";
 
@@ -167,6 +174,26 @@ const createResultSummary = (result: Result): string => {
 // State
 // -------------------------------------------------------------------------------------
 
+/**
+ * Tracks an active deferred block awaiting completion.
+ */
+class DeferredBlock extends Schema.Class<DeferredBlock>("CodemodeProcessor/DeferredBlock")({
+  /** Offset of the DeferredBlockAddedEvent (serves as unique ID) */
+  blockOffset: Schema.String,
+  /** The code to execute on each poll */
+  code: Schema.String,
+  /** How often to check, in seconds */
+  checkIntervalSeconds: Schema.Number,
+  /** Maximum number of poll attempts */
+  maxAttempts: Schema.Number,
+  /** Human-readable description */
+  description: Schema.String,
+  /** Number of polls attempted so far */
+  attemptCount: Schema.Number,
+  /** Last poll time in elapsed seconds (to know when to poll next) */
+  lastPollElapsedSeconds: Schema.Number,
+}) {}
+
 class State extends Schema.Class<State>("CodemodeProcessor/State")({
   lastOffset: Offset,
   /** Accumulated assistant message text from the current LLM request */
@@ -185,6 +212,10 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
   registeredTools: Schema.Array(RegisteredTool),
   /** Tool names for which we've emitted system prompt edits */
   toolPromptsEmitted: Schema.HashSet(Schema.String),
+  /** Active deferred blocks awaiting completion, keyed by blockOffset */
+  deferredBlocks: Schema.Array(DeferredBlock),
+  /** Current elapsed seconds from TimeTickEvent (for scheduling deferred polls) */
+  currentElapsedSeconds: Schema.Number,
 }) {
   static initial = State.make({
     lastOffset: Offset.make("-1"),
@@ -196,6 +227,8 @@ class State extends Schema.Class<State>("CodemodeProcessor/State")({
     systemPromptEmitted: false,
     registeredTools: [],
     toolPromptsEmitted: HashSet.empty(),
+    deferredBlocks: [],
+    currentElapsedSeconds: 0,
   });
 }
 
@@ -244,12 +277,24 @@ type ExecutionContext = {
   execa: typeof import("execa").execa;
   process: { env: typeof process.env };
   require: typeof global.require;
+  /** Emit an event to the stream */
+  emit: (event: EventInput) => void;
   /** Registered tools, keyed by name */
   [toolName: string]: unknown;
 };
 
-type SuccessResult = { success: true; data: string; logs: Array<LogEntry> };
-type FailureResult = { success: false; error: string; logs: Array<LogEntry> };
+type SuccessResult = {
+  success: true;
+  data: string;
+  logs: Array<LogEntry>;
+  emittedEvents: Array<EventInput>;
+};
+type FailureResult = {
+  success: false;
+  error: string;
+  logs: Array<LogEntry>;
+  emittedEvents: Array<EventInput>;
+};
 type Result = SuccessResult | FailureResult;
 
 /**
@@ -318,6 +363,7 @@ const executeCode = async (
   tools: ReadonlyMap<string, ToolFunction>,
 ): Promise<Result> => {
   const logs: Array<LogEntry> = [];
+  const emittedEvents: Array<EventInput> = [];
 
   const logger =
     (level: LogEntry["level"]) =>
@@ -333,10 +379,15 @@ const executeCode = async (
     debug: logger("debug"),
   };
 
+  // Create emit function that collects events
+  const emit = (event: EventInput): void => {
+    emittedEvents.push(event);
+  };
+
   try {
     // Build the parameter list for the wrapper function
     const toolNames = Array.from(tools.keys());
-    const baseParams = ["console", "fetch", "execa", "process", "require"];
+    const baseParams = ["console", "fetch", "execa", "process", "require", "emit"];
     const allParams = [...baseParams, ...toolNames];
 
     // Wrap the code to inject our console, tools, and extract the function
@@ -359,6 +410,7 @@ const executeCode = async (
       execa: execa,
       process: { env: process.env },
       require: global.require,
+      emit,
     };
 
     // Add each tool to the context
@@ -371,13 +423,18 @@ const executeCode = async (
     // Try to serialize the result
     try {
       const serialized = JSON.stringify(result);
-      return { success: true, data: serialized, logs };
+      return { success: true, data: serialized, logs, emittedEvents };
     } catch {
-      return { success: true, data: JSON.stringify("[non-serializable result]"), logs };
+      return {
+        success: true,
+        data: JSON.stringify("[non-serializable result]"),
+        logs,
+        emittedEvents,
+      };
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return { success: false, error: errorMessage, logs };
+    return { success: false, error: errorMessage, logs, emittedEvents };
   }
 };
 
@@ -498,6 +555,62 @@ const reduce = (state: State, event: Event): State => {
     });
   }
 
+  // Track time ticks for deferred block scheduling
+  if (TimeTickEvent.is(event)) {
+    return State.make({
+      ...base,
+      currentElapsedSeconds: event.payload.elapsedSeconds,
+    });
+  }
+
+  // Track deferred block registration
+  if (DeferredBlockAddedEvent.is(event)) {
+    const newBlock = DeferredBlock.make({
+      blockOffset: event.offset,
+      code: event.payload.code,
+      checkIntervalSeconds: event.payload.checkIntervalSeconds,
+      maxAttempts: event.payload.maxAttempts,
+      description: event.payload.description,
+      attemptCount: 0,
+      lastPollElapsedSeconds: state.currentElapsedSeconds, // Start from current time
+    });
+    return State.make({
+      ...base,
+      deferredBlocks: [...state.deferredBlocks, newBlock],
+    });
+  }
+
+  // Track deferred poll attempts (update attempt count and last poll time)
+  if (DeferredPollAttemptedEvent.is(event)) {
+    return State.make({
+      ...base,
+      deferredBlocks: state.deferredBlocks.map((block) =>
+        block.blockOffset === event.payload.blockOffset
+          ? DeferredBlock.make({
+              ...block,
+              attemptCount: event.payload.attemptNumber,
+              lastPollElapsedSeconds: event.payload.elapsedSeconds,
+            })
+          : block,
+      ),
+    });
+  }
+
+  // Remove deferred blocks on completion, failure, timeout, or cancellation
+  if (
+    DeferredCompletedEvent.is(event) ||
+    DeferredFailedEvent.is(event) ||
+    DeferredTimedOutEvent.is(event) ||
+    DeferredCancelledEvent.is(event)
+  ) {
+    return State.make({
+      ...base,
+      deferredBlocks: state.deferredBlocks.filter(
+        (block) => block.blockOffset !== event.payload.blockOffset,
+      ),
+    });
+  }
+
   return State.make(base);
 };
 
@@ -608,6 +721,14 @@ export const CodemodeProcessor: Processor<never> = {
                 // Run the evaluation (this is async/Promise-based)
                 const result = yield* Effect.promise(() => executeCode(code, tools));
 
+                // Append any events emitted by the code
+                if (result.emittedEvents.length > 0) {
+                  yield* Effect.log(`appending ${result.emittedEvents.length} emitted events`);
+                  for (const emittedEvent of result.emittedEvents) {
+                    yield* stream.append(emittedEvent);
+                  }
+                }
+
                 // Annotate span with result
                 yield* Effect.annotateCurrentSpan("eval.success", result.success);
                 if (!result.success) {
@@ -641,6 +762,159 @@ export const CodemodeProcessor: Processor<never> = {
                   yield* stream.append(UserMessageEvent.make({ content: summary }));
                 }
               }).pipe(withSpanFromEvent("codemode.eval", event));
+            }
+
+            // When a time tick arrives, check if any deferred blocks need polling
+            if (TimeTickEvent.is(event)) {
+              const elapsedSeconds = event.payload.elapsedSeconds;
+
+              // Find blocks that are due for polling
+              const blocksToPoll = state.deferredBlocks.filter((block) => {
+                const timeSinceLastPoll = elapsedSeconds - block.lastPollElapsedSeconds;
+                return timeSinceLastPoll >= block.checkIntervalSeconds;
+              });
+
+              if (blocksToPoll.length > 0) {
+                yield* Effect.log(
+                  `time tick at ${elapsedSeconds}s, polling ${blocksToPoll.length} deferred blocks`,
+                );
+              }
+
+              for (const block of blocksToPoll) {
+                yield* Effect.gen(function* () {
+                  const attemptNumber = block.attemptCount + 1;
+                  yield* Effect.log(
+                    `polling deferred block ${block.blockOffset} (attempt ${attemptNumber}/${block.maxAttempts}): ${block.description}`,
+                  );
+
+                  // Build the tools map
+                  const tools = buildToolsMap(state.registeredTools);
+
+                  // Execute the deferred block code
+                  const result = yield* Effect.promise(() => executeCode(block.code, tools));
+
+                  // Append any events emitted by the code
+                  if (result.emittedEvents.length > 0) {
+                    yield* Effect.log(
+                      `deferred block emitted ${result.emittedEvents.length} events`,
+                    );
+                    for (const emittedEvent of result.emittedEvents) {
+                      yield* stream.append(emittedEvent);
+                    }
+                  }
+
+                  if (!result.success) {
+                    // Code threw an error - deferred block failed
+                    yield* Effect.log(
+                      `deferred block ${block.blockOffset} failed: ${result.error}`,
+                    );
+                    yield* stream.append(
+                      DeferredPollAttemptedEvent.make({
+                        blockOffset: block.blockOffset,
+                        attemptNumber,
+                        elapsedSeconds,
+                        result: null,
+                        logs: [...result.logs],
+                      }),
+                    );
+                    yield* stream.append(
+                      DeferredFailedEvent.make({
+                        blockOffset: block.blockOffset,
+                        error: result.error,
+                      }),
+                    );
+                    // Notify LLM of failure
+                    yield* stream.append(
+                      UserMessageEvent.make({
+                        content: dedent`
+                          <developer-message>
+                            [Deferred task failed]
+
+                            Task: ${block.description}
+                            Error: ${result.error}
+
+                            Console logs:
+                            ${formatLogs([...result.logs])}
+                          </developer-message>
+                        `,
+                      }),
+                    );
+                    return;
+                  }
+
+                  // Check if result is truthy (task complete) or falsy (keep polling)
+                  const parsedResult = JSON.parse(result.data);
+                  const isComplete = Boolean(parsedResult);
+
+                  yield* stream.append(
+                    DeferredPollAttemptedEvent.make({
+                      blockOffset: block.blockOffset,
+                      attemptNumber,
+                      elapsedSeconds,
+                      result: isComplete ? result.data : null,
+                      logs: [...result.logs],
+                    }),
+                  );
+
+                  if (isComplete) {
+                    // Task completed successfully
+                    yield* Effect.log(`deferred block ${block.blockOffset} completed`);
+                    yield* stream.append(
+                      DeferredCompletedEvent.make({
+                        blockOffset: block.blockOffset,
+                        result: result.data,
+                      }),
+                    );
+                    // Notify LLM of completion
+                    yield* stream.append(
+                      UserMessageEvent.make({
+                        content: dedent`
+                          <developer-message>
+                            [Deferred task completed]
+
+                            Task: ${block.description}
+                            Result: ${result.data}
+
+                            Console logs:
+                            ${formatLogs([...result.logs])}
+                          </developer-message>
+                        `,
+                      }),
+                    );
+                  } else if (attemptNumber >= block.maxAttempts) {
+                    // Timed out - exceeded max attempts
+                    yield* Effect.log(
+                      `deferred block ${block.blockOffset} timed out after ${attemptNumber} attempts`,
+                    );
+                    yield* stream.append(
+                      DeferredTimedOutEvent.make({
+                        blockOffset: block.blockOffset,
+                        attempts: attemptNumber,
+                      }),
+                    );
+                    // Notify LLM of timeout
+                    yield* stream.append(
+                      UserMessageEvent.make({
+                        content: dedent`
+                          <developer-message>
+                            [Deferred task timed out]
+
+                            Task: ${block.description}
+                            Attempts: ${attemptNumber}
+
+                            The task did not complete within the maximum number of polling attempts.
+                          </developer-message>
+                        `,
+                      }),
+                    );
+                  } else {
+                    // Still pending - keep polling
+                    yield* Effect.log(
+                      `deferred block ${block.blockOffset} still pending (attempt ${attemptNumber}/${block.maxAttempts})`,
+                    );
+                  }
+                }).pipe(withSpanFromEvent(`codemode.deferred-poll.${block.blockOffset}`, event));
+              }
             }
           }),
         ),
