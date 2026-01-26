@@ -374,19 +374,20 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             const task = await response.json();
             const runId = task.run_id;
             
-            // Build the deferred block code using string concatenation to avoid escaping issues
-            const deferredCode = 'async function codemode() {' +
-              ' const status = await checkResearchStatus({ runId: "' + runId + '" });' +
-              ' console.log("Research status for ' + runId + ':", status.status);' +
-              ' if (status.status === "failed") {' +
-              '   throw new Error("Research failed: " + (status.error || "Unknown error"));' +
-              ' }' +
-              ' if (status.status === "completed") {' +
-              '   const result = await getResearchResult({ runId: "' + runId + '" });' +
-              '   return { runId: "' + runId + '", report: result.report };' +
-              ' }' +
-              ' return null;' +
-              '}';
+            // Build the deferred block code by serializing a real function (guarantees valid syntax)
+            const deferredCode = (async function codemode_deferred() {
+              const RUN_ID = "{{RUN_ID}}";
+              const status = await checkResearchStatus({ runId: RUN_ID });
+              console.log("Research status for " + RUN_ID + ":", status.status);
+              if (status.status === "failed") {
+                throw new Error("Research failed: " + (status.error || "Unknown error"));
+              }
+              if (status.status === "completed") {
+                const result = await getResearchResult({ runId: RUN_ID });
+                return { runId: RUN_ID, report: result.report };
+              }
+              return null;
+            }).toString().replace("codemode_deferred", "codemode").replace(/{{RUN_ID}}/g, runId);
             
             // Emit a deferred block that will poll for completion
             emit({
