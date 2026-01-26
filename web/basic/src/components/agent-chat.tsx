@@ -374,35 +374,25 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             const task = await response.json();
             const runId = task.run_id;
             
+            // Build the deferred block code using string concatenation to avoid escaping issues
+            const deferredCode = 'async function codemode() {' +
+              ' const status = await checkResearchStatus({ runId: "' + runId + '" });' +
+              ' console.log("Research status for ' + runId + ':", status.status);' +
+              ' if (status.status === "failed") {' +
+              '   throw new Error("Research failed: " + (status.error || "Unknown error"));' +
+              ' }' +
+              ' if (status.status === "completed") {' +
+              '   const result = await getResearchResult({ runId: "' + runId + '" });' +
+              '   return { runId: "' + runId + '", report: result.report };' +
+              ' }' +
+              ' return null;' +
+              '}';
+            
             // Emit a deferred block that will poll for completion
-            // The deferred block code calls checkResearchStatus and getResearchResult (registered tools)
             emit({
               type: "iterate:codemode:deferred-block-added",
               payload: {
-                code: \`
-                  async function codemode() {
-                    // Check the research status
-                    const status = await checkResearchStatus({ runId: "\${runId}" });
-                    console.log("Research status for \${runId}:", status.status);
-                    
-                    if (status.status === "failed") {
-                      throw new Error("Research failed: " + (status.error || "Unknown error"));
-                    }
-                    
-                    if (status.status === "completed") {
-                      // Fetch the full result
-                      const result = await getResearchResult({ runId: "\${runId}" });
-                      return {
-                        query: \\\`\${params.query.replace(/\`/g, "'")}\\\`,
-                        runId: "\${runId}",
-                        report: result.report,
-                      };
-                    }
-                    
-                    // Still running - return null to keep polling
-                    return null;
-                  }
-                \`,
+                code: deferredCode,
                 checkIntervalSeconds: 30,
                 maxAttempts: 60, // 30 minutes max
                 description: "Deep research: " + params.query.slice(0, 100) + (params.query.length > 100 ? "..." : ""),
