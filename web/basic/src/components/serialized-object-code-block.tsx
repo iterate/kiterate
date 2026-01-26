@@ -99,7 +99,7 @@ export function SerializedObjectCodeBlock({
     } else if (displayData === null) {
       code = currentFormat === "yaml" ? "null" : "null";
     } else if (currentFormat === "yaml") {
-      code = stringifyYaml(displayData);
+      code = stringifyYaml(displayData, { lineWidth: 0 }).trimEnd();
     } else {
       code = JSON.stringify(displayData, null, 2);
     }
@@ -144,7 +144,7 @@ export function SerializedObjectCodeBlock({
       } else if (data === null) {
         yamlCode = "null";
       } else {
-        yamlCode = stringifyYaml(data);
+        yamlCode = stringifyYaml(data, { lineWidth: 0 });
       }
       await navigator.clipboard.writeText(yamlCode);
       setCopiedYaml(true);
