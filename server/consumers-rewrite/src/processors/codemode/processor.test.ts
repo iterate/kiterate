@@ -612,3 +612,249 @@ it.scoped("tool with invalid implementation reports error", () =>
     expect(failed.error).toContain("invalid implementation");
   }),
 );
+
+// -------------------------------------------------------------------------------------
+// Deferred Block Tests
+// -------------------------------------------------------------------------------------
+
+import {
+  DeferredBlockAddedEvent,
+  DeferredCompletedEvent,
+  DeferredFailedEvent,
+  DeferredPollAttemptedEvent,
+  DeferredTimedOutEvent,
+} from "./events.js";
+import { TimeTickEvent } from "../clock/events.js";
+
+it.scoped("deferred block completes when it returns truthy", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Add a deferred block that succeeds on first poll
+    yield* stream.append(
+      DeferredBlockAddedEvent.make({
+        code: dedent`
+          async function codemode() {
+            console.log("Polling...");
+            return { result: "done!" };
+          }
+        `,
+        checkIntervalSeconds: 10,
+        maxAttempts: 5,
+        description: "Test deferred block",
+      }),
+    );
+
+    // Emit a time tick to trigger polling
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 10 }));
+
+    // Should see poll attempted
+    const pollEvent = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
+    expect(pollEvent.payload.attemptNumber).toBe(1);
+    expect(pollEvent.payload.result).not.toBeNull();
+    const pollLogs = pollEvent.payload.logs as Array<{ args: unknown[] }>;
+    expect(pollLogs).toHaveLength(1);
+    expect(pollLogs[0]?.args).toEqual(["Polling..."]);
+
+    // Should see completion
+    const completedEvent = yield* stream.waitForEvent(DeferredCompletedEvent);
+    expect(completedEvent.payload.result).toContain("done!");
+
+    // Should notify the LLM
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("Deferred task completed");
+    expect(userMsg.payload.content).toContain("done!");
+  }),
+);
+
+it.scoped("deferred block keeps polling when it returns falsy", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Add a deferred block that needs multiple polls
+    // This block always returns null, so it will keep polling until it times out
+    yield* stream.append(
+      DeferredBlockAddedEvent.make({
+        code: dedent`
+          async function codemode() {
+            // This will be called multiple times
+            // First call returns null (keep polling), second returns result
+            return null; // Always return null for this test - we'll check it polls multiple times
+          }
+        `,
+        checkIntervalSeconds: 10,
+        maxAttempts: 3,
+        description: "Multi-poll test",
+      }),
+    );
+
+    // First tick at 10s
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 10 }));
+    const poll1 = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
+    expect(poll1.payload.attemptNumber).toBe(1);
+    expect(poll1.payload.result).toBeNull(); // Still pending
+
+    // Second tick at 20s
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 20 }));
+    const poll2 = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
+    expect(poll2.payload.attemptNumber).toBe(2);
+    expect(poll2.payload.result).toBeNull();
+
+    // Third tick at 30s - should time out
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 30 }));
+    const poll3 = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
+    expect(poll3.payload.attemptNumber).toBe(3);
+
+    // Should see timeout
+    const timeoutEvent = yield* stream.waitForEvent(DeferredTimedOutEvent);
+    expect(timeoutEvent.payload.attempts).toBe(3);
+
+    // Should notify the LLM
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("Deferred task timed out");
+  }),
+);
+
+it.scoped("deferred block fails when it throws", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Add a deferred block that throws
+    yield* stream.append(
+      DeferredBlockAddedEvent.make({
+        code: dedent`
+          async function codemode() {
+            throw new Error("Something went wrong!");
+          }
+        `,
+        checkIntervalSeconds: 10,
+        maxAttempts: 5,
+        description: "Failing deferred block",
+      }),
+    );
+
+    // Emit a time tick to trigger polling
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 10 }));
+
+    // Should see poll attempted (with no result)
+    const pollEvent = yield* stream.waitForEvent(DeferredPollAttemptedEvent);
+    expect(pollEvent.payload.attemptNumber).toBe(1);
+    expect(pollEvent.payload.result).toBeNull();
+
+    // Should see failure
+    const failedEvent = yield* stream.waitForEvent(DeferredFailedEvent);
+    expect(failedEvent.payload.error).toContain("Something went wrong!");
+
+    // Should notify the LLM
+    const userMsg = yield* stream.waitForEvent(UserMessageEvent);
+    expect(userMsg.payload.content).toContain("Deferred task failed");
+    expect(userMsg.payload.content).toContain("Something went wrong!");
+  }),
+);
+
+it.scoped("deferred block can use registered tools", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Register a tool
+    yield* stream.append(
+      ToolRegisteredEvent.make({
+        name: "getStatus",
+        description: "Get current status",
+        parametersJsonSchema: {
+          type: "object",
+          properties: {},
+        },
+        returnDescription: Option.none(),
+        implementation: `return { status: "ready", value: 42 };`,
+      }),
+    );
+
+    // Wait for system prompts
+    yield* stream.waitForEvent(SystemPromptEditEvent);
+    yield* stream.waitForEvent(SystemPromptEditEvent);
+
+    // Add a deferred block that uses the tool
+    yield* stream.append(
+      DeferredBlockAddedEvent.make({
+        code: dedent`
+          async function codemode() {
+            const status = await getStatus({});
+            if (status.status === "ready") {
+              return { result: status.value };
+            }
+            return null;
+          }
+        `,
+        checkIntervalSeconds: 10,
+        maxAttempts: 5,
+        description: "Tool-using deferred block",
+      }),
+    );
+
+    // Emit a time tick
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 10 }));
+
+    // Should complete successfully
+    const completedEvent = yield* stream.waitForEvent(DeferredCompletedEvent);
+    expect(completedEvent.payload.result).toContain("42");
+  }),
+);
+
+it.scoped("codemode can emit deferred block via emit()", () =>
+  Effect.gen(function* () {
+    const stream = yield* makeTestEventStream(StreamPath.make("test"));
+
+    yield* CodemodeProcessor.run(stream).pipe(Effect.forkScoped);
+    yield* stream.waitForSubscribe();
+
+    // Run a codemode block that emits a deferred block
+    const requestStarted = yield* stream.append(RequestStartedEvent.make({ requestParams: [] }));
+    yield* emitCodemodeBlock(
+      stream,
+      requestStarted.offset,
+      dedent`
+        <codemode>
+        async function codemode() {
+          emit({
+            type: "iterate:codemode:deferred-block-added",
+            payload: {
+              code: 'async function codemode() { return { emitted: true }; }',
+              checkIntervalSeconds: 10,
+              maxAttempts: 3,
+              description: "Emitted deferred block",
+            },
+          });
+          return { started: true };
+        }
+        </codemode>
+      `,
+    );
+
+    // Wait for the codemode to complete
+    yield* stream.waitForEvent(CodeEvalDoneEvent);
+
+    // The deferred block should have been added
+    const deferredAdded = yield* stream.waitForEvent(DeferredBlockAddedEvent);
+    expect(deferredAdded.payload.description).toBe("Emitted deferred block");
+
+    // Emit a time tick to trigger the deferred block
+    yield* stream.append(TimeTickEvent.make({ elapsedSeconds: 10 }));
+
+    // Should complete
+    const completed = yield* stream.waitForEvent(DeferredCompletedEvent);
+    expect(completed.payload.result).toContain("emitted");
+  }),
+);

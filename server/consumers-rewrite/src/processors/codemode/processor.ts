@@ -266,11 +266,6 @@ const extractCodemodeBlocks = (
   return blocks;
 };
 
-/**
- * A tool function that can be called from codemode.
- */
-type ToolFunction = (params: unknown) => Promise<unknown>;
-
 type ExecutionContext = {
   console: Console;
   fetch: typeof global.fetch;
@@ -298,57 +293,74 @@ type FailureResult = {
 type Result = SuccessResult | FailureResult;
 
 /**
- * Create a tool function from a RegisteredTool's implementation string.
+ * Context passed to tool implementations.
+ * Similar to ExecutionContext but without index signature for cleaner typing.
+ */
+type ToolContext = {
+  console: Console;
+  fetch: typeof global.fetch;
+  execa: typeof import("execa").execa;
+  process: { env: typeof process.env };
+  require: typeof global.require;
+  /** Emit an event to the stream (for deferred blocks, etc.) */
+  emit: (event: { type: string; payload: Record<string, unknown> }) => void;
+};
+
+/**
+ * Create a tool function factory from a RegisteredTool's implementation string.
+ *
+ * Returns a function that takes a context (including emit) and returns the actual tool function.
+ * This allows us to bind emit at call time rather than at creation time.
  *
  * The implementation string is the body of an async function that receives:
  * - `params` - the validated parameters
- * - `fetch`, `execa`, `console`, `process`, `require` from ExecutionContext
+ * - `fetch`, `execa`, `console`, `process`, `require`, `emit` from ToolContext
  */
-const createToolFunction = (tool: RegisteredTool): ToolFunction => {
+const createToolFunctionFactory = (
+  tool: RegisteredTool,
+): ((context: ToolContext) => (params: unknown) => Promise<unknown>) => {
   // Build a function that wraps the implementation string
-  // The implementation has access to: params, fetch, execa, console, process, require
+  // The implementation has access to: params, fetch, execa, console, process, require, emit
   const wrappedCode = `
     return async function ${tool.name}(params, context) {
-      const { fetch, execa, console, process, require } = context;
+      const { fetch, execa, console, process, require, emit } = context;
       ${tool.implementation}
     };
   `;
 
   try {
     const fn = new Function(wrappedCode)();
-    return async (params: unknown) => {
+    return (context: ToolContext) => async (params: unknown) => {
       // TODO: Validate params against parametersJsonSchema here
-      const context = {
-        fetch: global.fetch,
-        execa: execa,
-        console: global.console,
-        process: { env: process.env },
-        require: global.require,
-      };
       return fn(params, context);
     };
   } catch (error) {
     // If the implementation is invalid, return a function that throws
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return async () => {
+    return () => async () => {
       throw new Error(`Tool "${tool.name}" has invalid implementation: ${errorMessage}`);
     };
   }
 };
 
 /**
- * Build a map of tool functions from registered tools.
+ * Build a map of tool function factories from registered tools.
+ *
+ * Returns factories that need to be bound with a context (including emit) at call time.
  */
-const buildToolsMap = (
+const buildToolFactories = (
   registeredTools: ReadonlyArray<RegisteredTool>,
-): ReadonlyMap<string, ToolFunction> => {
-  const tools = new Map<string, ToolFunction>();
+): ReadonlyMap<string, (context: ToolContext) => (params: unknown) => Promise<unknown>> => {
+  const factories = new Map<
+    string,
+    (context: ToolContext) => (params: unknown) => Promise<unknown>
+  >();
 
   for (const tool of registeredTools) {
-    tools.set(tool.name, createToolFunction(tool));
+    factories.set(tool.name, createToolFunctionFactory(tool));
   }
 
-  return tools;
+  return factories;
 };
 
 /**
@@ -356,11 +368,14 @@ const buildToolsMap = (
  * Code must define `async function codemode() { ... }`.
  *
  * @param code - The code to execute
- * @param tools - Map of tool name to tool function
+ * @param toolFactories - Map of tool name to tool function factory
  */
 const executeCode = async (
   code: string,
-  tools: ReadonlyMap<string, ToolFunction>,
+  toolFactories: ReadonlyMap<
+    string,
+    (context: ToolContext) => (params: unknown) => Promise<unknown>
+  >,
 ): Promise<Result> => {
   const logs: Array<LogEntry> = [];
   const emittedEvents: Array<EventInput> = [];
@@ -379,14 +394,25 @@ const executeCode = async (
     debug: logger("debug"),
   };
 
-  // Create emit function that collects events
-  const emit = (event: EventInput): void => {
-    emittedEvents.push(event);
+  // Create emit function that collects events (used by codemode and tools)
+  const emit = (event: { type: string; payload: Record<string, unknown> }): void => {
+    // Convert plain object to EventInput-like shape
+    emittedEvents.push(EventInput.make({ type: event.type as never, payload: event.payload }));
+  };
+
+  // Tool context for binding tools
+  const toolContext: ToolContext = {
+    console: capturedConsole as Console,
+    fetch: global.fetch,
+    execa: execa,
+    process: { env: process.env },
+    require: global.require,
+    emit,
   };
 
   try {
     // Build the parameter list for the wrapper function
-    const toolNames = Array.from(tools.keys());
+    const toolNames = Array.from(toolFactories.keys());
     const baseParams = ["console", "fetch", "execa", "process", "require", "emit"];
     const allParams = [...baseParams, ...toolNames];
 
@@ -403,7 +429,7 @@ const executeCode = async (
 
     const factory = new Function(wrappedCode)();
 
-    // Build the context object with base context + tools
+    // Build the context object with base context + bound tools
     const context: ExecutionContext = {
       console: capturedConsole as Console,
       fetch: global.fetch,
@@ -413,9 +439,9 @@ const executeCode = async (
       emit,
     };
 
-    // Add each tool to the context
-    for (const [name, fn] of tools) {
-      context[name] = fn;
+    // Bind each tool factory with the tool context and add to execution context
+    for (const [name, toolFactory] of toolFactories) {
+      context[name] = toolFactory(toolContext);
     }
 
     const result = await factory(context);
@@ -715,11 +741,11 @@ export const CodemodeProcessor: Processor<never> = {
                 yield* Effect.log(`evaluating code block ${requestId}`);
                 yield* stream.append(CodeEvalStartedEvent.make({ requestId }));
 
-                // Build the tools map from registered tools
-                const tools = buildToolsMap(state.registeredTools);
+                // Build the tool factories from registered tools
+                const toolFactories = buildToolFactories(state.registeredTools);
 
                 // Run the evaluation (this is async/Promise-based)
-                const result = yield* Effect.promise(() => executeCode(code, tools));
+                const result = yield* Effect.promise(() => executeCode(code, toolFactories));
 
                 // Append any events emitted by the code
                 if (result.emittedEvents.length > 0) {
@@ -787,11 +813,13 @@ export const CodemodeProcessor: Processor<never> = {
                     `polling deferred block ${block.blockOffset} (attempt ${attemptNumber}/${block.maxAttempts}): ${block.description}`,
                   );
 
-                  // Build the tools map
-                  const tools = buildToolsMap(state.registeredTools);
+                  // Build the tool factories
+                  const toolFactories = buildToolFactories(state.registeredTools);
 
                   // Execute the deferred block code
-                  const result = yield* Effect.promise(() => executeCode(block.code, tools));
+                  const result = yield* Effect.promise(() =>
+                    executeCode(block.code, toolFactories),
+                  );
 
                   // Append any events emitted by the code
                   if (result.emittedEvents.length > 0) {

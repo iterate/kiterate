@@ -348,10 +348,12 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             required: ["query"],
             additionalProperties: false,
           },
-          returnDescription: "Object with runId to use with checkResearchStatus",
+          returnDescription:
+            "Object with runId and confirmation that background polling has started",
           implementation: dedent`
             const processor = params.processor || "pro-fast";
             
+            // Start the research task
             const response = await fetch("https://api.parallel.ai/v1/tasks/runs", {
               method: "POST",
               headers: {
@@ -370,11 +372,48 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
             }
             
             const task = await response.json();
+            const runId = task.run_id;
+            
+            // Emit a deferred block that will poll for completion
+            // The deferred block code calls checkResearchStatus and getResearchResult (registered tools)
+            emit({
+              type: "iterate:codemode:deferred-block-added",
+              payload: {
+                code: \`
+                  async function codemode() {
+                    // Check the research status
+                    const status = await checkResearchStatus({ runId: "\${runId}" });
+                    console.log("Research status for \${runId}:", status.status);
+                    
+                    if (status.status === "failed") {
+                      throw new Error("Research failed: " + (status.error || "Unknown error"));
+                    }
+                    
+                    if (status.status === "completed") {
+                      // Fetch the full result
+                      const result = await getResearchResult({ runId: "\${runId}" });
+                      return {
+                        query: \\\`\${params.query.replace(/\`/g, "'")}\\\`,
+                        runId: "\${runId}",
+                        report: result.report,
+                      };
+                    }
+                    
+                    // Still running - return null to keep polling
+                    return null;
+                  }
+                \`,
+                checkIntervalSeconds: 30,
+                maxAttempts: 60, // 30 minutes max
+                description: "Deep research: " + params.query.slice(0, 100) + (params.query.length > 100 ? "..." : ""),
+              },
+            });
+            
             return {
-              runId: task.run_id,
-              status: "running",
+              runId: runId,
+              status: "polling-started",
               processor: processor,
-              message: "Research started. Use checkResearchStatus with this runId to check progress. Consider using sleep for 30-60 seconds before checking.",
+              message: "Research started and background polling enabled. You'll be notified automatically when results are ready.",
             };
           `,
         },
@@ -471,44 +510,11 @@ export function AgentChat({ agentPath, apiURL, onConnectionStatusChange }: Agent
         },
       };
 
-      // Tool 3: Sleep (for pacing async operations)
-      const sleepEvent = {
-        type: "iterate:codemode:tool-registered",
-        payload: {
-          name: "sleep",
-          description:
-            "Wait for a specified duration. Useful for pacing async operations like waiting for research to complete. Use this between checkResearchStatus calls.",
-          parametersJsonSchema: {
-            type: "object",
-            properties: {
-              seconds: {
-                type: "number",
-                description: "Number of seconds to wait (max 120)",
-              },
-              reason: {
-                type: "string",
-                description: "Why you are waiting (for logging purposes)",
-              },
-            },
-            required: ["seconds"],
-            additionalProperties: false,
-          },
-          returnDescription: "Confirmation that the sleep completed",
-          implementation: dedent`
-            const seconds = Math.min(params.seconds, 120); // Cap at 2 minutes
-            console.log("Sleeping for " + seconds + " seconds" + (params.reason ? ": " + params.reason : ""));
-            await new Promise(resolve => setTimeout(resolve, seconds * 1000));
-            return { slept: seconds, reason: params.reason || "unspecified" };
-          `,
-        },
-      };
-
-      // Register all four tools
+      // Register the three tools (sleep removed - deferred blocks handle timing automatically)
       const results = await Promise.all([
         sendRawJson(apiURL, agentPath, JSON.stringify(startResearchEvent)),
         sendRawJson(apiURL, agentPath, JSON.stringify(checkResearchEvent)),
         sendRawJson(apiURL, agentPath, JSON.stringify(getResearchResultEvent)),
-        sendRawJson(apiURL, agentPath, JSON.stringify(sleepEvent)),
       ]);
 
       const allOk = results.every((r) => r.ok);
