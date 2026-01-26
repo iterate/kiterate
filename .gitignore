@@ -4,3 +4,4 @@ dist/
 .claude/
 .iterate/
 .data/
+*ignoreme*

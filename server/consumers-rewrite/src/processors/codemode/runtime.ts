@@ -57,8 +57,8 @@ export const liveLayer = Layer.succeed(CodeExecutionRuntime, {
 export interface TestRuntimeOptions {
   /** Mock fetch implementation */
   fetch?: typeof global.fetch;
-  /** Mock execa implementation */
-  execa?: typeof execaReal;
+  /** Mock execa implementation (can be full execa or simplified ExecaFn) */
+  execa?: typeof execaReal | ExecaFn;
   /** Mock environment variables */
   env?: Record<string, string | undefined>;
   /** Mock require (defaults to real require) */
